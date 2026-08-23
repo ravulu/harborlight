@@ -144,6 +144,8 @@ lib/
 
 ## Notes
 
+- [Deploying on Vercel](docs/deploy-vercel.md) — the closer fit for Next, and
+  the one database change serverless requires.
 - [Deploying on Render](docs/deploy-render.md) — the environment variables,
   the two that are read at build time rather than run time, and what breaks
   when they are wrong.

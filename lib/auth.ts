@@ -46,7 +46,19 @@ const devOrigins = devHostnames.flatMap((host) => [
  * alone — so the cookie would travel unprotected on a server that had gone to
  * the trouble of a certificate. Only the scheme is touched, never the host.
  */
-const configuredURL = process.env.BETTER_AUTH_URL
+/**
+ * On Vercel, fall back to the project's stable production domain.
+ *
+ * BETTER_AUTH_URL is the only trusted origin in production, so a first deploy
+ * that cannot yet know its own URL would reject every sign-up. The production
+ * host is used rather than VERCEL_URL, which changes with each deployment:
+ * trusting that would mean the cookie's origin moved every time anything
+ * shipped.
+ */
+const vercelURL = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+  : undefined
+const configuredURL = process.env.BETTER_AUTH_URL ?? vercelURL
 const baseURL = isDev
   ? configuredURL
     ? configuredURL.replace(/^https?:/, `${devScheme}:`)

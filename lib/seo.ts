@@ -11,14 +11,29 @@ import type { Metadata } from 'next'
  * phrases in KEYWORDS are used to write those too, not just the tag.
  */
 
+function siteUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL?.trim()
+  if (explicit) return explicit.replace(/\/$/, '')
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
+  if (vercel) return `https://${vercel.replace(/^https?:\/\//, '').replace(/\/$/, '')}`
+  return 'http://localhost:3000'
+}
+
 export const SITE = {
   name: 'Harborlight',
   /**
    * The public origin, used for canonical links, the sitemap and share cards.
+   *
    * Set NEXT_PUBLIC_SITE_URL to the deployed domain; a wrong value here makes
-   * every canonical point at a host that does not serve the page.
+   * every canonical point at a host that does not serve the page, which is
+   * worse than having none.
+   *
+   * On Vercel it falls back to the project's own production domain, so a first
+   * deploy is not stuck choosing a URL it cannot know yet. That variable is
+   * the stable production host rather than VERCEL_URL, which is unique to each
+   * deployment and would make every preview claim to be canonical.
    */
-  url: (process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+  url: siteUrl(),
   /** Shown as the site name on share cards. */
   publisher: 'Harborlight',
   locale: 'en_US',
