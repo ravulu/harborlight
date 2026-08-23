@@ -1,0 +1,46 @@
+# Render blueprint. Create the service from this rather than by hand:
+# Render Dashboard -> New -> Blueprint -> point at this repo.
+#
+# The database is not declared here. Harborlight runs against Supabase, which
+# lives outside Render, so DATABASE_URL is set as a secret rather than wired to
+# a managed instance. Swap in a `databases:` block if you move Postgres here.
+services:
+  - type: web
+    name: harborlight
+    runtime: node
+    plan: starter # free tier sleeps after inactivity; a cold start costs ~30s
+    region: oregon
+    branch: main
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: 22.20.0
+
+      # --- Secrets. Set these in the dashboard; never commit them. ---------
+      - key: DATABASE_URL
+        sync: false # Supabase session pooler string, port 5432
+      - key: BETTER_AUTH_SECRET
+        sync: false # node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+
+      # --- Origin. Both must be the exact public URL, no trailing slash. ---
+      # BETTER_AUTH_URL is the only trusted origin in production: if it does
+      # not match what the browser sends, every sign-up fails on "Invalid
+      # origin" after the page has already been served.
+      - key: BETTER_AUTH_URL
+        sync: false
+      # Read at BUILD time, not run time — Next inlines NEXT_PUBLIC_* into the
+      # bundle. Changing it needs a rebuild, not a restart.
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+
+      # --- Access. Empty or unset means nobody may open /admin. -----------
+      - key: ADMIN_EMAILS
+        sync: false
+
+      # Per instance. Supabase's session pooler allows few connections on the
+      # smaller plans, and this multiplies by instance count.
+      - key: DATABASE_POOL_MAX
+        value: "5"
