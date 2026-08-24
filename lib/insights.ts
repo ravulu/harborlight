@@ -374,36 +374,92 @@ export function buildInsights(
     })
   }
 
-  // 9. The match is the only guaranteed return on offer anywhere in a plan.
+  // 9. The match is the only guaranteed return on offer anywhere in a plan —
+  // and now the only one this card can put a figure on, because the plan knows
+  // the terms rather than describing them in the abstract.
   if (yearsWorking > 0 && inputs.monthlyContribution > 0) {
-    out.push({
-      key: 'match',
-      priority: 15,
-      title: 'Check you are getting the whole employer match first',
-      body:
-        `Your ${money(inputs.monthlyContribution)} a month is what this plan grows on, but not every dollar ` +
-        `of it is worth the same. A match is an immediate return of 50% or 100% on the part that earns ` +
-        `it, which nothing else in a portfolio offers and no market has to cooperate with. If the ` +
-        `contribution is set below whatever your employer matches, raising it to that line is the ` +
-        `highest-return change available to this plan.`,
-    })
+    const stated = inputs.annualSalary > 0 && inputs.employerMatchPercent > 0
+    const missing = result.matchLeftBehind
+    const matchable = (inputs.annualSalary * inputs.employerMatchLimitPercent) / 100
+    const firstYearMatch = result.rows[0]?.employerMatch ?? 0
+
+    if (stated && missing > 0) {
+      out.push({
+        key: 'match',
+        priority: 5,
+        title: `You are leaving ${money(missing)} a year of employer money behind`,
+        body:
+          `Your employer matches ${inputs.employerMatchPercent}% of what you put in, up to ` +
+          `${inputs.employerMatchLimitPercent}% of your ${money(inputs.annualSalary)} salary — so ` +
+          `${money(matchable)} a year of contributions earns a match. You are contributing ` +
+          `${money(inputs.monthlyContribution * 12)}, which collects ${money(firstYearMatch)} and leaves ` +
+          `${money(missing)} unclaimed. Raising the contribution to ${money(matchable / 12)} a month is the ` +
+          `highest-return change available anywhere in this plan: an immediate ` +
+          `${inputs.employerMatchPercent}% on the money that earns it, with no market having to cooperate. ` +
+          `Across your ${yearsWorking} remaining working ${yearsWorking === 1 ? 'year' : 'years'} that is ` +
+          `${money(missing * yearsWorking)} of somebody else's money, before any growth on it.`,
+      })
+    } else if (stated) {
+      out.push({
+        key: 'match',
+        priority: 55,
+        title: `You are collecting the whole ${money(firstYearMatch)} match`,
+        body:
+          `Your contribution reaches the ${inputs.employerMatchLimitPercent}% of salary your employer ` +
+          `matches, so nothing is being left behind — ${money(result.totalEmployerMatch)} across your ` +
+          `remaining working years, in today's money. Contributing more than that is still worth doing ` +
+          `for the tax shelter, but it earns no further match: past this line every extra dollar is ` +
+          `working on its own.`,
+      })
+    } else {
+      out.push({
+        key: 'match',
+        priority: 15,
+        title: 'Check you are getting the whole employer match first',
+        body:
+          `A match is an immediate return of 50% or 100% on the part of your contribution that earns ` +
+          `it, which nothing else in a portfolio offers and no market has to cooperate with. This plan ` +
+          `does not know yours: fill in your salary and your employer's match terms under Saving and ` +
+          `it will work out whether ${money(inputs.monthlyContribution)} a month is collecting all of ` +
+          `it, and what any shortfall is costing you.`,
+      })
+    }
   }
 
   // 10. The only account taxed nowhere at all, if it is spent on health.
   if (yearsWorking > 0 && inputs.currentAge < 65) {
     const catchUp = inputs.currentAge >= 55
-    out.push({
-      key: 'hsa',
-      priority: 25,
-      title: 'An HSA is the only account taxed at neither end',
-      body:
-        `If you are on a high-deductible health plan, ${money(4400)} on your own or ${money(8750)} for a ` +
-        `family goes in untaxed in 2026${catchUp ? `, plus ${money(1000)} from 55` : ''}, grows untaxed, and comes out ` +
-        `untaxed for medical costs — which are the expense this plan is least able to predict. After 65 ` +
-        `anything else it is spent on is taxed like a 401(k) withdrawal but without a penalty, so it is ` +
-        `a retirement account that happens to be free if health costs arrive. Contributions stop when ` +
-        `Medicare starts.`,
-    })
+    const hasHsa = inputs.hsaBalance > 0 || inputs.hsaMonthlyContribution > 0
+    const atRetirement = result.rows.find((r) => r.phase === 'retirement')
+
+    if (hasHsa && atRetirement) {
+      out.push({
+        key: 'hsa',
+        priority: 25,
+        title: `Your HSA reaches ${money(atRetirement.hsaBalance)} by ${atRetirement.age}, taxed at neither end`,
+        body:
+          `${money(inputs.hsaBalance)} today and ${money(inputs.hsaMonthlyContribution)} a month goes in ` +
+          `untaxed, grows untaxed, and comes out untaxed for medical costs — which are the expense this ` +
+          `plan is least able to predict. Nothing is ever forced out of it, unlike the 401(k), so the ` +
+          `projection spends it before the Roth on the assumption that care is what it will pay for. ` +
+          `After 65 anything else it is spent on is taxed like a 401(k) withdrawal but without a ` +
+          `penalty, so the worst case is that it was an ordinary retirement account all along. ` +
+          `Contributions stop when Medicare starts.`,
+      })
+    } else {
+      out.push({
+        key: 'hsa',
+        priority: 25,
+        title: 'An HSA is the only account taxed at neither end',
+        body:
+          `If you are on a high-deductible health plan, ${money(4400)} on your own or ${money(8750)} for a ` +
+          `family goes in untaxed in 2026${catchUp ? `, plus ${money(1000)} from 55` : ''}, grows untaxed, and comes out ` +
+          `untaxed for medical costs — which are the expense this plan is least able to predict. After 65 ` +
+          `anything else it is spent on is taxed like a 401(k) withdrawal but without a penalty, so it is ` +
+          `a retirement account that happens to be free if health costs arrive. Contributions stop when ` +
+          `Medicare starts. Add yours under Saving and the projection will carry it.`,
+      })
+    }
   }
 
   // 11. The same portfolio, in a different order of accounts, keeps more.

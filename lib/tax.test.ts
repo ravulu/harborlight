@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { STATE_TAXES, findState, taxesSocialSecurityAt } from '@/lib/state-tax'
 import {
   ASSUMED_INDEXATION,
   BRACKET_YEAR,
@@ -447,5 +448,76 @@ describe('the bracket year', () => {
     expect(FEDERAL.married.standardDeduction).toBe(32_200)
     expect(FEDERAL.single.brackets.at(-1)?.rate).toBe(37)
     expect(FEDERAL.married.brackets).toHaveLength(FEDERAL.single.brackets.length)
+  })
+})
+
+/**
+ * The eight states that tax Social Security, and the limits that mean most
+ * retirees in them are not actually taxed on it.
+ *
+ * "Taxes Social Security" is a property of the state; whether it taxes any
+ * given household's benefit is a property of that household's income. Treating
+ * the first as the second charged every retiree in Minnesota for a tax the
+ * majority of them do not pay.
+ */
+describe('state tax on Social Security', () => {
+  const eight = ['CO', 'CT', 'MN', 'MT', 'NM', 'RI', 'UT', 'VT']
+
+  it('is still only eight states, and every one carries a limit', () => {
+    const taxing = STATE_TAXES.filter((s) => s.taxesSocialSecurity)
+    expect(taxing.map((s) => s.code).sort()).toEqual([...eight].sort())
+    for (const s of taxing) {
+      expect(s.socialSecurityExempt, s.code).toBeDefined()
+    }
+  })
+
+  it('exempts a modest income in every one of them', () => {
+    for (const code of eight) {
+      expect(
+        taxesSocialSecurityAt(findState(code), 'single', 24_000),
+        code,
+      ).toBe(false)
+    }
+  })
+
+  it('taxes a large income in all but Colorado', () => {
+    for (const code of eight) {
+      const taxed = taxesSocialSecurityAt(findState(code), 'single', 200_000)
+      // Colorado exempts by age instead, and a retiree is past it.
+      expect(taxed, code).toBe(code !== 'CO')
+    }
+  })
+
+  it('turns on age in Colorado rather than on income', () => {
+    const co = findState('CO')
+    expect(taxesSocialSecurityAt(co, 'single', 500_000, 65)).toBe(false)
+    expect(taxesSocialSecurityAt(co, 'single', 500_000, 64)).toBe(true)
+    // And the default age assumes a retiree, which is who is asking.
+    expect(taxesSocialSecurityAt(co, 'single', 500_000)).toBe(false)
+  })
+
+  it('gives a couple the higher limit', () => {
+    // Minnesota: $86,410 single, $110,780 joint.
+    const mn = findState('MN')
+    expect(taxesSocialSecurityAt(mn, 'single', 100_000)).toBe(true)
+    expect(taxesSocialSecurityAt(mn, 'married', 100_000)).toBe(false)
+  })
+
+  it('never applies in the forty-two that do not tax it at all', () => {
+    for (const state of STATE_TAXES.filter((s) => !s.taxesSocialSecurity)) {
+      expect(
+        taxesSocialSecurityAt(state, 'single', 500_000),
+        state.code,
+      ).toBe(false)
+    }
+  })
+
+  it('changes what a plan in one of them actually pays', () => {
+    // A modest Minnesota retiree pays no state tax on the benefit; a wealthy
+    // one does. Before the limits both were charged.
+    const modest = taxYear(45_000, 30_000, 'MN', 'single')
+    expect(modest.stateTaxesSocialSecurity).toBe(false)
+    const wealthy = taxYear(180_000, 40_000, 'MN', 'single')
+    expect(wealthy.stateTaxesSocialSecurity).toBe(true)
   })
 })

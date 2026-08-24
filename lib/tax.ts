@@ -1,5 +1,5 @@
 import type { Bracket, FilingStatus } from '@/lib/state-tax'
-import { findState, scheduleFor } from '@/lib/state-tax'
+import { findState, scheduleFor, taxesSocialSecurityAt } from '@/lib/state-tax'
 import { benefitFactor } from '@/lib/social-security'
 import type { PlanInputs } from '@/lib/retirement'
 
@@ -320,7 +320,6 @@ export function taxYear(
   const schedule = state ? scheduleFor(state, status) : undefined
   const stateBrackets = schedule?.brackets ?? []
   const stateDeduction = schedule?.standardDeduction ?? 0
-  const stateTaxesSS = state?.taxesSocialSecurity ?? false
   const fed = taxTableFor(year).federal[status]
 
   const netNeed = Math.max(0, spending - benefit - otherIncome)
@@ -332,6 +331,8 @@ export function taxYear(
     const federalTax = taxOn(federalIncome, fed.brackets, fed.standardDeduction)
     // A state that exempts retirement withdrawals still taxes a pension and
     // other income, so only the withdrawal is dropped from the base.
+    const agi = ordinary + taxableSS
+    const stateTaxesSS = taxesSocialSecurityAt(state, status, agi)
     const stateIncome =
       (withdrawalsExempt ? 0 : withdrawal) + otherIncome + (stateTaxesSS ? taxableSS : 0)
     const stateTax = taxOn(stateIncome, stateBrackets, stateDeduction)
@@ -363,7 +364,14 @@ export function taxYear(
     benefit,
     taxableSocialSecurity: taxableSS,
     taxableShare: benefit > 0 ? taxableSS / benefit : 0,
-    stateTaxesSocialSecurity: stateTaxesSS,
+    // Reported for the household this estimate was built for, not for the
+    // state in the abstract: a state that taxes the benefit may well not tax
+    // theirs, and the tax tab says which.
+    stateTaxesSocialSecurity: taxesSocialSecurityAt(
+      state,
+      status,
+      gross + otherIncome + taxableSS,
+    ),
   }
 }
 
@@ -476,6 +484,11 @@ export interface DrawRules {
    */
   earlyPenalty?: boolean
   /**
+   * The age this draw is made at. Only used to decide whether a state exempts
+   * the benefit by age rather than by income, which one of the eight does.
+   */
+  age?: number
+  /**
    * A Roth conversion made this year: ordinary income in full, and unlike
    * every other kind of income it pays for nothing. The money moves from one
    * sheltered account to another, so the need is unchanged while the bracket
@@ -521,7 +534,6 @@ export function withdrawForNeed(
   const schedule = scheduleFor(state ?? ({} as never), status)
   const stateBrackets = state ? schedule.brackets : []
   const stateDeduction = state ? schedule.standardDeduction : 0
-  const stateTaxesSS = state?.taxesSocialSecurity ?? false
   const fed = taxTableFor(year).federal[status]
   const gainShare = Math.min(1, Math.max(0, pots.gainShare / 100))
 
@@ -571,6 +583,11 @@ export function withdrawForNeed(
     // States that exempt retirement withdrawals still tax a brokerage gain,
     // and almost all of them tax it as ordinary income rather than at a
     // separate rate.
+    // Whether the state taxes the benefit is decided on this year's income,
+    // not on the state alone: all eight that do exempt it below a limit, and
+    // most retirees fall under theirs.
+    const agi = fromDeferred + converted + otherIncome + capitalGains + taxableSS
+    const stateTaxesSS = taxesSocialSecurityAt(state, status, agi, rules.age)
     const stateIncome =
       (withdrawalsExempt ? 0 : fromDeferred + converted) +
       otherIncome +

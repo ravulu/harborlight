@@ -100,6 +100,14 @@ export const retirementPlans = pgTable('retirement_plans', {
   traditionalIraBalance: real('traditionalIraBalance').notNull().default(0),
   rothIraBalance: real('rothIraBalance').notNull().default(0),
   monthlyContribution: real('monthlyContribution').notNull(),
+
+  // What the employer adds, and the HSA. Both default to zero, so every plan
+  // saved before these existed reads back exactly as it did.
+  annualSalary: real('annualSalary').notNull().default(0),
+  employerMatchPercent: real('employerMatchPercent').notNull().default(0),
+  employerMatchLimitPercent: real('employerMatchLimitPercent').notNull().default(0),
+  hsaBalance: real('hsaBalance').notNull().default(0),
+  hsaMonthlyContribution: real('hsaMonthlyContribution').notNull().default(0),
   preRetirementReturn: real('preRetirementReturn').notNull(),
   preRetirementVolatility: real('preRetirementVolatility').notNull().default(15),
 
@@ -119,6 +127,8 @@ export const retirementPlans = pgTable('retirement_plans', {
   socialSecurityCola: real('socialSecurityCola').notNull().default(2.8),
   spouseBenefitMonthly: real('spouseBenefitMonthly').notNull().default(0),
   spouseClaimAge: integer('spouseClaimAge').notNull().default(67),
+  /** Age the plan becomes a one-person household; 0 leaves it unmodelled. */
+  survivorFromAge: integer('survivorFromAge').notNull().default(0),
   pensionMonthly: real('pensionMonthly').notNull().default(0),
   pensionStartAge: integer('pensionStartAge').notNull().default(65),
   pensionCola: real('pensionCola').notNull().default(0),

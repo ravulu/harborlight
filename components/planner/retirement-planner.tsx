@@ -524,6 +524,8 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
   const hasSurplus = result.rows.some((r) => r.surplus > 0)
   const hasShortfall = result.rows.some((r) => r.unfunded > 0)
   const hasIrmaa = result.rows.some((r) => r.irmaaSurcharge > 0)
+  const hasMatch = result.rows.some((r) => r.employerMatch > 0)
+  const hasHsa = result.rows.some((r) => r.hsaBalance > 0)
 
   return (
     <div className="flex flex-col gap-3">
@@ -583,6 +585,22 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
                   benefit quoted in today's money elsewhere on the page. */}
               <th className="px-3 py-2 font-medium">Year</th>
               <th className="px-3 py-2 font-medium text-right">Contributions</th>
+              {hasMatch && (
+                <th
+                  className="px-3 py-2 font-medium text-right"
+                  title="What your employer added alongside your own contribution"
+                >
+                  Match
+                </th>
+              )}
+              {hasHsa && (
+                <th
+                  className="px-3 py-2 font-medium text-right"
+                  title="The HSA: paid in while working, drawn untaxed in retirement"
+                >
+                  HSA
+                </th>
+              )}
               <th className="px-3 py-2 font-medium text-right">
                 Spending
                 <span className="block text-[10px] font-normal normal-case">
@@ -661,6 +679,28 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
                 <td className="px-3 py-1.5 text-right text-muted-foreground">
                   {r.contributions ? fmt(r.contributions) : '—'}
                 </td>
+                {hasMatch && (
+                  <td className="px-3 py-1.5 text-right text-muted-foreground">
+                    {r.employerMatch ? fmt(r.employerMatch) : '—'}
+                  </td>
+                )}
+                {hasHsa && (
+                  // Paid in while working, drawn down after — one column, so
+                  // the account can be followed across the whole plan rather
+                  // than appearing twice under different headings.
+                  <td className="px-3 py-1.5 text-right text-muted-foreground">
+                    {r.hsaContribution
+                      ? fmt(r.hsaContribution)
+                      : r.fromHsa
+                        ? `−${fmt(r.fromHsa)}`
+                        : '—'}
+                    {r.hsaBalance >= 1 && (
+                      <span className="block text-[11px] text-muted-foreground/70">
+                        {fmt(r.hsaBalance)} left
+                      </span>
+                    )}
+                  </td>
+                )}
                 <td className="px-3 py-1.5 text-right text-foreground">
                   {r.spending ? fmt(r.spending) : '—'}
                 </td>

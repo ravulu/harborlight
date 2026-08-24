@@ -322,13 +322,34 @@ export function TaxPhases({
           </span>{' '}
           {state
             ? state.taxesSocialSecurity
-              ? 'Taxes Social Security, following the federal taxable amount. Its income limits, which exempt many retirees outright, are not modelled here.'
+              ? state.socialSecurityExempt
+                ? `One of the eight states that still taxes Social Security — but only above its income limit, which this plan is measured against. ${
+                    state.socialSecurityExempt.fromAge !== undefined
+                      ? `Here the exemption turns on age rather than income: a full deduction from ${state.socialSecurityExempt.fromAge}.`
+                      : `Below ${money(state.socialSecurityExempt[inputs.filingStatus])} of income the benefit is exempt; above it, it follows the federal taxable amount.`
+                  }`
+                : 'Taxes Social Security, following the federal taxable amount.'
               : 'Does not tax Social Security, so only the withdrawal is exposed to state tax.'
             : 'No state selected, so the rates you entered by hand apply to every year.'}{' '}
           {state?.retirementExempt
             ? 'Withdrawals from retirement accounts are exempt too, which is why the state rate is zero.'
             : ''}
         </p>
+
+        {state && state.single.brackets.length > 0 && (
+          <p className="text-justify hyphens-auto">
+            <span className="font-medium text-foreground">
+              State credits and exemptions are not modelled.
+            </span>{' '}
+            {state.name} is priced from its brackets and its standard deduction
+            alone. Most states also offer credits and exemptions aimed at
+            retirees — a low-income credit, an age-based exclusion, a deduction
+            on pension income — and none of them are counted here. The state
+            figures above therefore err high, and err highest for the lowest
+            incomes, which is where those reliefs are largest. Federal tax,
+            which is the bigger number on this page, is not affected.
+          </p>
+        )}
       </div>
     </div>
   )

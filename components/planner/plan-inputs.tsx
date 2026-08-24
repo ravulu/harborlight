@@ -510,7 +510,8 @@ function SpouseBenefit({
           {money(
             Math.max(workerFull * benefitFactor(inputs.socialSecurityAge), paid) * 12,
           )}{' '}
-          — the projection does not model that.
+          — and they would file single from then on, on half the brackets. The
+          projection does not model either yet.
         </p>
       )}
     </div>
@@ -1476,6 +1477,26 @@ export function PlanInputsPanel({
                 what you add between now and retiring. It goes into the 401(k),
                 which is where most payroll saving lands.
               </Field>
+              <Field name="HSA balance and monthly">
+                the only account taxed at neither end: it goes in untaxed,
+                grows untaxed, and comes out untaxed when it pays for care.
+                Nothing is ever forced out of it, so the plan spends it before
+                the Roth on the assumption that medical costs are what it will
+                meet. Leave both at zero if you have none. Contributions stop at
+                65, when Medicare starts.
+              </Field>
+              <Field name="Annual salary">
+                only used to work out the employer match — a match is a share
+                of pay up to a limit, so the pay has to be known. Leave it at
+                zero and no match is assumed rather than guessed.
+              </Field>
+              <Field name="Employer matches / up to this much of salary">
+                the two halves of a match. &ldquo;50% up to 6%&rdquo; means your
+                employer adds 50 cents for every dollar you put in, on the first
+                6% of your salary. Contributing past that line earns nothing
+                more; contributing under it leaves money behind, and the
+                insights below will say how much.
+              </Field>
               <Field name="Return while saving (nominal)">
                 the growth you assume, <em>before</em> inflation is taken off —
                 which is how returns are normally quoted. Inflation is entered
@@ -1569,6 +1590,63 @@ export function PlanInputsPanel({
             prefix="$"
             placeholder="e.g. 800"
             onChange={(v) => set('monthlyContribution', v)}
+          />
+          {/* Optional, and grouped after the contribution they modify. A plan
+              that says nothing here behaves exactly as it did before they
+              existed: no salary means no match, and no HSA means no fourth
+              pot. */}
+          <NumberField
+            id="hsaBalance"
+            label="HSA balance"
+            value={inputs.hsaBalance}
+            min={0}
+            max={100000000}
+            step={1000}
+            prefix="$"
+            placeholder="Optional"
+            onChange={(v) => set('hsaBalance', v ?? 0)}
+          />
+          <NumberField
+            id="hsaMonthlyContribution"
+            label="Monthly into the HSA"
+            value={inputs.hsaMonthlyContribution}
+            min={0}
+            max={10000}
+            step={25}
+            prefix="$"
+            placeholder="Optional"
+            onChange={(v) => set('hsaMonthlyContribution', v ?? 0)}
+          />
+          <NumberField
+            id="annualSalary"
+            label="Annual salary"
+            value={inputs.annualSalary}
+            min={0}
+            max={100000000}
+            step={1000}
+            prefix="$"
+            placeholder="Optional, for the match"
+            onChange={(v) => set('annualSalary', v ?? 0)}
+          />
+          <SliderField
+            id="employerMatchPercent"
+            label="Employer matches"
+            value={inputs.employerMatchPercent}
+            min={0}
+            max={100}
+            step={5}
+            suffix="%"
+            onChange={(v) => set('employerMatchPercent', v)}
+          />
+          <SliderField
+            id="employerMatchLimitPercent"
+            label="…up to this much of salary"
+            value={inputs.employerMatchLimitPercent}
+            min={0}
+            max={25}
+            step={0.5}
+            suffix="%"
+            onChange={(v) => set('employerMatchLimitPercent', v)}
           />
           <SliderField
             id="preRetirementReturn"
@@ -1719,6 +1797,13 @@ export function PlanInputsPanel({
               derived. It is treated as one levy on withdrawals, so it cannot
               tell one account from another and the Tax tab has less to show
               you.
+            </Field>
+            <Field name="What state tax leaves out">
+              a state is priced from its brackets and standard deduction only.
+              Credits and exemptions aimed at retirees — low-income credits,
+              age-based exclusions, deductions on pension income — are not
+              counted, so the state figures err high, and highest for the
+              lowest incomes. Federal tax, the bigger number, is unaffected.
             </Field>
             <p>
               The rates shown are{' '}

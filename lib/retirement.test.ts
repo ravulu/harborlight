@@ -49,6 +49,33 @@ describe('every row accounts for itself', () => {
       plan({ taxState: 'CUSTOM', federalTaxRate: 18, stateTaxRate: 5 }),
     ],
     ['a plan in a state with no income tax', plan({ taxState: 'TX' })],
+    [
+      'a plan with an employer match and an HSA',
+      plan({
+        currentAge: 45,
+        retirementAge: 65,
+        endAge: 88,
+        annualSalary: 120_000,
+        employerMatchPercent: 100,
+        employerMatchLimitPercent: 4,
+        hsaBalance: 30_000,
+        hsaMonthlyContribution: 250,
+      }),
+    ],
+    [
+      'a plan that spends its HSA down',
+      plan({
+        currentAge: 66,
+        retirementAge: 66,
+        endAge: 80,
+        brokerageBalance: 60_000,
+        balance401k: 80_000,
+        rothIraBalance: 250_000,
+        hsaBalance: 120_000,
+        monthlyRetirementSpending: 6_000,
+        socialSecurityMonthly: 1_500,
+      }),
+    ],
   ]
 
   it.each(plans)('%s', (_label, inputs) => {
@@ -68,7 +95,8 @@ describe('every row accounts for itself', () => {
       // Every dollar withdrawn came out of one of the three pots, in every
       // year of every plan — including the years after the money runs out,
       // where the answer is that nothing was withdrawn at all.
-      const sources = row.fromBrokerage + row.fromDeferred + row.fromRoth
+      const sources =
+        row.fromBrokerage + row.fromDeferred + row.fromRoth + row.fromHsa
       expect(sources, `withdrawal sources at ${where}`).toBeCloseTo(row.withdrawals, 4)
 
       // A shortfall is a figure in its own right, never a withdrawal.
@@ -79,7 +107,10 @@ describe('every row accounts for itself', () => {
 
       // The pots add up to the balance the charts plot.
       expect(
-        row.brokerageBalance + row.deferredBalance + row.rothBalance,
+        row.brokerageBalance +
+          row.deferredBalance +
+          row.rothBalance +
+          row.hsaBalance,
         `pot balances at ${where}`,
       ).toBeCloseTo(row.endBalance, 4)
 

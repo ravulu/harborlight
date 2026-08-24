@@ -37,6 +37,12 @@ export const FPL_PER_EXTRA_PERSON = 5_500
 /** Household income above this share of the poverty line gets no credit at all. */
 export const CLIFF = 4.0
 
+/**
+ * Below this share of the poverty line the marketplace credit does not apply
+ * at all — Medicaid does instead, at little or no cost to the household.
+ */
+export const MEDICAID_FLOOR = 1.0
+
 export interface PercentageTier {
   /** Share of the poverty line at which this tier starts. */
   from: number
@@ -172,6 +178,8 @@ export interface AcaCost {
   fplRatio: number
   /** Whether income has passed 400% and taken the whole credit with it. */
   overCliff: boolean
+  /** Whether income is low enough that Medicaid covers it instead. */
+  onMedicaid: boolean
   /** Income that could still be added before it does. Zero once it has. */
   roomBelowCliff: number
 }
@@ -195,10 +203,17 @@ export function acaCost(
   const benchmark = benchmarkAnnual(age, householdSize)
   const overCliff = fplRatio > CLIFF
 
-  // Below the poverty line the marketplace credit does not apply either — that
-  // is Medicaid territory, which this projection does not model. Treating it
-  // as fully subsidised is closer to the truth than charging full price.
-  const expected = overCliff ? benchmark : (magi * applicablePercentage(fplRatio)) / 100
+  // Below the poverty line the marketplace credit does not apply: that is
+  // Medicaid, which costs a household little or nothing. Treated as fully
+  // covered rather than charged full price — in the forty states that expanded
+  // it that is right, and in the ten that did not there is a coverage gap this
+  // cannot represent either way.
+  const onMedicaid = fplRatio < MEDICAID_FLOOR
+  const expected = onMedicaid
+    ? 0
+    : overCliff
+      ? benchmark
+      : (magi * applicablePercentage(fplRatio)) / 100
   const subsidy = Math.max(0, benchmark - expected)
 
   return {
@@ -207,6 +222,7 @@ export function acaCost(
     net: Math.max(0, benchmark - subsidy),
     fplRatio,
     overCliff,
+    onMedicaid,
     roomBelowCliff: Math.max(0, line * CLIFF - magi),
   }
 }

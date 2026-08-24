@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ACA_YEAR,
   AGE_FACTOR,
@@ -216,5 +216,35 @@ describe('acaMagiOf', () => {
 describe('Medicare age', () => {
   it('is when marketplace cover stops mattering', () => {
     expect(MEDICARE_AGE).toBe(65)
+  })
+})
+
+/**
+ * The same staleness guard the tax and IRMAA tables carry.
+ *
+ * The poverty guidelines are reissued every January, the applicable percentage
+ * table every summer, and the benchmark premium every autumn. All three go out
+ * of date annually and nothing about the arithmetic would say so.
+ */
+describe('the ACA year', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('has not been overtaken by the calendar', () => {
+    const currentYear = new Date().getFullYear()
+    expect(
+      currentYear,
+      `lib/aca.ts holds ${ACA_YEAR} figures but it is now ${currentYear}. Update ` +
+        `FPL_BASE, APPLICABLE_PERCENTAGE and BENCHMARK_40_MONTHLY from the ` +
+        `published figures, then move ACA_YEAR. Note the poverty guidelines ` +
+        `used are the previous year's — that is how the credit works.`,
+    ).toBeLessThanOrEqual(ACA_YEAR)
+  })
+
+  it('trips as soon as the calendar passes it', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(`${ACA_YEAR + 1}-06-15T12:00:00`))
+    expect(new Date().getFullYear()).toBeGreaterThan(ACA_YEAR)
   })
 })

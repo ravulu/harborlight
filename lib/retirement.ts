@@ -29,6 +29,26 @@ export interface PlanInputs {
   /** Roth: nothing owed on the way out, so it is drawn last. */
   rothIraBalance: number
   monthlyContribution: number
+  /**
+   * Pay, and the match terms on it.
+   *
+   * Only used to work out the employer match, which cannot be computed from a
+   * contribution alone: a match is a share of pay up to a limit, so both the
+   * pay and the limit have to be known. Zero salary means "not said", and the
+   * match is then nothing rather than a guess.
+   */
+  annualSalary: number
+  /** cents matched per dollar contributed, as a percent — 50 or 100 usually */
+  employerMatchPercent: number
+  /** how much of pay the match applies to, as a percent — often 6 */
+  employerMatchLimitPercent: number
+  /**
+   * The HSA: taxed at neither end when it pays for care, which nothing else
+   * is. Held apart from the Roth because it is the pot to spend on the medical
+   * costs retirement brings, and because nothing is ever forced out of it.
+   */
+  hsaBalance: number
+  hsaMonthlyContribution: number
   preRetirementReturn: number // annual %, e.g. 7
   preRetirementVolatility: number // annual standard deviation of returns, %
   postRetirementReturn: number // annual %, e.g. 4
@@ -59,6 +79,14 @@ export interface PlanInputs {
    */
   spouseBenefitMonthly: number
   spouseClaimAge: number
+  /**
+   * PARKED — carried but not yet acted on. See the note in `simulate`.
+   *
+   * The age from which the plan would be a household of one. Kept on the type
+   * and in the stored schema so that turning the modelling back on is a change
+   * to the projection alone, with no migration and no plan needing re-entry.
+   */
+  survivorFromAge: number
   /** monthly pension in today's dollars; 0 if none */
   pensionMonthly: number
   pensionStartAge: number
@@ -94,6 +122,15 @@ export interface YearRow {
   phase: 'accumulation' | 'retirement'
   startBalance: number
   contributions: number
+  /**
+   * What the employer added alongside them. Kept apart because it is not your
+   * money going in — it is the return on the part of your own that earned it,
+   * and no other line in the plan pays 50% in the year it is paid.
+   */
+  employerMatch: number
+  /** Paid into the HSA, and taken out of it. Never taxed either way. */
+  hsaContribution: number
+  fromHsa: number
   /**
    * What is actually spent this year: the figure entered, held level in real
    * terms, which means rising with inflation in the dollars of the day. This
@@ -146,6 +183,7 @@ export interface YearRow {
   brokerageBalance: number
   deferredBalance: number
   rothBalance: number
+  hsaBalance: number
   /**
    * The distribution the law required from the 401(k) and IRA this year, and
    * how much of the withdrawal was left over once the year had been paid for.
@@ -213,6 +251,12 @@ export interface PlanResult {
   lastsThroughRetirement: boolean
   /** total contributed over the accumulation phase */
   totalContributions: number
+  /**
+   * What the employer added across the same years, and what a larger
+   * contribution would still collect each year and currently does not.
+   */
+  totalEmployerMatch: number
+  matchLeftBehind: number
   /** peak balance reached, in today's dollars like everything else */
   peakBalance: number
   /** Social Security received in the first year it is claimed, nominal. */
@@ -235,6 +279,13 @@ export const DEFAULT_INPUTS: PlanInputs = {
   traditionalIraBalance: 0,
   rothIraBalance: 0,
   monthlyContribution: 800,
+  // Left at nothing rather than guessed: a match is an arrangement with an
+  // employer, and inventing one would put money in a plan nobody is owed.
+  annualSalary: 0,
+  employerMatchPercent: 0,
+  employerMatchLimitPercent: 0,
+  hsaBalance: 0,
+  hsaMonthlyContribution: 0,
   preRetirementReturn: 7,
   // A growth-tilted portfolio; retirees usually hold something steadier.
   preRetirementVolatility: 15,
@@ -256,6 +307,8 @@ export const DEFAULT_INPUTS: PlanInputs = {
   socialSecurityCola: 2.8,
   spouseBenefitMonthly: 0,
   spouseClaimAge: 67,
+  // Not assumed. Naming a year is the user's to do.
+  survivorFromAge: 0,
   // Optional, so they default to none rather than to a guess.
   pensionMonthly: 0,
   pensionStartAge: 65,
@@ -416,6 +469,26 @@ export function toPlanInputs(draft: PlanDraft): PlanInputs | null {
  *   so contributions and withdrawals earn a partial year of return (mid-year
  *   convention).
  */
+/**
+ * TODO — survivor benefits are not modelled.
+ *
+ * When one of a couple dies the survivor keeps the larger of the two Social
+ * Security benefits and loses the smaller outright, and from then on files
+ * single: half the brackets, half the standard deduction, half the thresholds
+ * for the Medicare surcharge. Income falls and the rate charged on it rises,
+ * in the same year. On a couple with $3,000 and $1,600 monthly benefits it was
+ * worth about $42,000 of extra lifetime tax — the largest single thing that
+ * can happen to a married plan.
+ *
+ * It was built and then taken back out, to be returned to deliberately rather
+ * than shipped half-considered. What remains is `PlanInputs.survivorFromAge`
+ * and its column in the stored schema, both carried and both ignored, so that
+ * turning it on again is a change to this function alone: no migration, and no
+ * saved plan needing to be re-entered.
+ *
+ * The two halves have to arrive together. Cutting the benefit without moving
+ * the filing status models a fall in income and misses most of the cost.
+ */
 export function simulate(inputs: PlanInputs): PlanResult {
   const {
     currentAge,
@@ -446,6 +519,11 @@ export function simulate(inputs: PlanInputs): PlanResult {
     filingStatus,
     // Absent on every stored plan, and on every plan the form produces. Only
     // the candidates `compareConversions` builds ever set them.
+    annualSalary,
+    employerMatchPercent,
+    employerMatchLimitPercent,
+    hsaBalance,
+    hsaMonthlyContribution,
     conversionAnnual = 0,
     conversionFromAge = 0,
     conversionToAge = 0,
@@ -471,6 +549,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
    */
   const magiByAge = new Map<number, number>()
   let totalIrmaa = 0
+  let totalEmployerMatch = 0
   const infl = inflationRate / 100
   const cola = socialSecurityCola / 100
   // Only the gap between the COLA and inflation moves the benefit in real
@@ -496,7 +575,24 @@ export function simulate(inputs: PlanInputs): PlanResult {
   let brokerage = brokerageBalance
   let deferred = balance401k + traditionalIraBalance
   let roth = rothIraBalance
-  const currentSavings = brokerage + deferred + roth
+  let hsa = hsaBalance
+  const currentSavings = brokerage + deferred + roth + hsa
+
+  /**
+   * What the employer puts in alongside each year's contribution.
+   *
+   * A match is a share of pay up to a limit, not a share of whatever you
+   * happen to contribute — so contributing past the limit earns nothing more,
+   * and contributing under it leaves money behind. Both halves of that are why
+   * it needs the salary and the limit rather than the contribution alone.
+   */
+  const matchable = (annualSalary * employerMatchLimitPercent) / 100
+  const employeeAnnual = monthlyContribution * 12
+  const employerMatchAnnual =
+    (Math.min(employeeAnnual, matchable) * employerMatchPercent) / 100
+  /** What a larger contribution would still collect, and currently does not. */
+  const matchLeftBehind =
+    (Math.max(0, matchable - employeeAnnual) * employerMatchPercent) / 100
   let balance = currentSavings
   let balanceAtRetirement: number | null = null
   let retirementDeflator = 1
@@ -525,6 +621,9 @@ export function simulate(inputs: PlanInputs): PlanResult {
     const inflator = Math.pow(1 + infl, yearsFromNow)
 
     let contributions = 0
+    let employerMatch = 0
+    let hsaContribution = 0
+    let fromHsa = 0
     let socialSecurity = 0
     let otherIncome = 0
     let withdrawals = 0
@@ -550,16 +649,24 @@ export function simulate(inputs: PlanInputs): PlanResult {
     if (isAccumulation) {
       rate = preRetirementReturn / 100
       contributions = monthlyContribution * 12
+      employerMatch = employerMatchAnnual
+      hsaContribution = hsaMonthlyContribution * 12
     } else {
       rate = postRetirementReturn / 100
 
       const annualSpending = annualSpendingReal * inflator
 
+      // From the year a spouse dies the household is one person: the survivor
+      // keeps the larger benefit and files single. Both arrive together, and
+      // both cut the same way — which is why a widow's income can fall while
+      // the rate charged on it rises.
+
       // Social Security only once it has been claimed. It arrives worth what
       // was entered, then its own adjustment applies to each year after.
+      let ownBenefit = 0
       if (age >= socialSecurityAge) {
         const yearsClaiming = age - socialSecurityAge
-        socialSecurity =
+        ownBenefit =
           socialSecurityMonthly *
           12 *
           claimFactor *
@@ -575,6 +682,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
       // Only a couple has a spousal share to claim. Without this gate a
       // single filer with no spouse would be paid half their own benefit
       // again, since the entitlement is computed from the worker's record.
+      let spouseBenefit = 0
       if (filingStatus === 'married') {
         const spousalStart = Math.max(spouseClaimAge, socialSecurityAge)
         const { own, paid } = spouseMonthlyBenefit(
@@ -590,9 +698,11 @@ export function simulate(inputs: PlanInputs): PlanResult {
         const start = own > 0 ? spouseClaimAge : spousalStart
         if (age >= start) {
           const monthly = age >= spousalStart ? paid : own
-          socialSecurity += monthly * 12 * inflator * Math.pow(colaDrift, age - start)
+          spouseBenefit = monthly * 12 * inflator * Math.pow(colaDrift, age - start)
         }
       }
+
+      socialSecurity = ownBenefit + spouseBenefit
 
       // A pension and any other income reduce what savings must cover, and
       // both count as ordinary income for tax.
@@ -669,11 +779,17 @@ export function simulate(inputs: PlanInputs): PlanResult {
             brokerage: brokerage / inflator,
             gainShare: brokerageGainShare,
             deferred: (deferred - conversion) / inflator,
-            roth: roth / inflator,
+            // The HSA is untaxed on the way out exactly as the Roth is, so the
+            // tax engine has no reason to tell them apart. They go in as one
+            // pot and the draw is split below — HSA first, because it is the
+            // one earmarked for the medical costs retirement brings, and the
+            // one whose advantage is lost if it is never spent on them.
+            roth: (roth + hsa) / inflator,
           },
           {
             requiredDeferred: rmdThisYear / inflator,
             earlyPenalty: penalised,
+            age,
             conversion: conversion / inflator,
           },
         )
@@ -688,6 +804,8 @@ export function simulate(inputs: PlanInputs): PlanResult {
         fromBrokerage = draw.fromBrokerage * inflator
         fromDeferred = draw.fromDeferred * inflator
         fromRoth = draw.fromRoth * inflator
+        fromHsa = Math.min(fromRoth, hsa)
+        fromRoth -= fromHsa
         unfunded = draw.unfunded * inflator
         required = draw.requiredDistribution * inflator
         surplus = draw.surplus * inflator
@@ -700,7 +818,8 @@ export function simulate(inputs: PlanInputs): PlanResult {
         // branch is: the grossed-up figure is what the year needed, not what
         // it could take.
         const convertible = deferred - conversion
-        const available = brokerage + convertible + roth
+        const untaxed = roth + hsa
+        const available = brokerage + convertible + untaxed
         const forced = Math.min(rmdThisYear, convertible)
         // The conversion is income at the stated rate, and it funds nothing —
         // so its tax is an extra cost the withdrawal has to carry.
@@ -715,7 +834,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
           return {
             fromB,
             fromD: forced + extra,
-            fromR: Math.min(rest - fromB - extra, roth),
+            fromR: Math.min(rest - fromB - extra, untaxed),
           }
         }
 
@@ -743,6 +862,8 @@ export function simulate(inputs: PlanInputs): PlanResult {
         fromBrokerage = parts.fromB
         fromDeferred = parts.fromD
         fromRoth = parts.fromR
+        fromHsa = Math.min(fromRoth, hsa)
+        fromRoth -= fromHsa
         required = forced
         earlyPenalty = penalised ? fromDeferred * EARLY_WITHDRAWAL_PENALTY_RATE : 0
         // Charged on the withdrawal rather than inferred from the difference,
@@ -789,11 +910,12 @@ export function simulate(inputs: PlanInputs): PlanResult {
     // one, and why the gains rate starts to matter late in such a plan.
     const flows = {
       brokerage: surplus - fromBrokerage,
+      hsa: hsaContribution - fromHsa,
       // A conversion leaves the deferred pot and arrives in the Roth. It nets
       // to nothing across the plan, which is why it does not appear in
       // `withdrawals` and does not move the total balance — only the tax it
       // triggers does, and that has already been drawn above.
-      deferred: contributions - fromDeferred - conversion,
+      deferred: contributions + employerMatch - fromDeferred - conversion,
       roth: -fromRoth + conversion,
     }
     // Mid-year convention, per pot: half of each pot's own flow grows with it.
@@ -804,17 +926,19 @@ export function simulate(inputs: PlanInputs): PlanResult {
     const growth =
       grow(brokerage, flows.brokerage) +
       grow(deferred, flows.deferred) +
-      grow(roth, flows.roth) -
-      (brokerage + deferred + roth) -
+      grow(roth, flows.roth) +
+      grow(hsa, flows.hsa) -
+      (brokerage + deferred + roth + hsa) -
       // The net flow across all three pots. The surplus left the deferred pot
       // inside `withdrawals` and came back into the brokerage, so it nets out
       // of the money that actually left the plan.
-      (contributions - withdrawals + surplus)
+      (contributions + employerMatch + hsaContribution - withdrawals + surplus)
     brokerage = grow(brokerage, flows.brokerage)
     deferred = grow(deferred, flows.deferred)
     roth = grow(roth, flows.roth)
+    hsa = grow(hsa, flows.hsa)
 
-    let endBalance = brokerage + deferred + roth
+    let endBalance = brokerage + deferred + roth + hsa
 
     if (endBalance <= 0) endBalance = 0
 
@@ -848,6 +972,9 @@ export function simulate(inputs: PlanInputs): PlanResult {
       // Start-of-year, so it deflates by the start-of-year factor.
       startBalance: startBalance * flowDeflator,
       contributions: contributions * flowDeflator,
+      employerMatch: employerMatch * flowDeflator,
+      hsaContribution: hsaContribution * flowDeflator,
+      fromHsa: fromHsa * flowDeflator,
       spending: isAccumulation ? 0 : annualSpendingReal,
       spendingThatYear: isAccumulation ? 0 : annualSpendingReal * inflator,
       socialSecurity: socialSecurity * flowDeflator,
@@ -861,6 +988,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
       brokerageBalance: brokerage * balanceDeflator,
       deferredBalance: deferred * balanceDeflator,
       rothBalance: roth * balanceDeflator,
+      hsaBalance: hsa * balanceDeflator,
       taxes: taxes * flowDeflator,
       requiredDistribution: required * flowDeflator,
       surplus: surplus * flowDeflator,
@@ -877,6 +1005,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
     })
 
     totalContributions += contributions * flowDeflator
+    totalEmployerMatch += employerMatch * flowDeflator
     totalSocialSecurity += socialSecurity * flowDeflator
     totalTaxes += taxes * flowDeflator
     totalIrmaa += irmaaSurcharge * flowDeflator
@@ -897,6 +1026,8 @@ export function simulate(inputs: PlanInputs): PlanResult {
     depletionAge,
     lastsThroughRetirement: depletionAge === null,
     totalContributions,
+    totalEmployerMatch,
+    matchLeftBehind,
     peakBalance,
     firstYearSocialSecurity,
     totalSocialSecurity,
