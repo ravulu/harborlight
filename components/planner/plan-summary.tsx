@@ -3,6 +3,7 @@
 import type { PlanInputs, PlanResult } from '@/lib/retirement'
 import type { MonteCarloResult, Outcomes } from '@/lib/monte-carlo'
 import type { ClaimComparison, Suggestion } from '@/lib/suggestions'
+import type { EarliestRetirement } from '@/lib/earliest'
 import { TARGET_CONFIDENCE } from '@/lib/suggestions'
 import { formatCurrency } from '@/lib/retirement'
 import { Card } from '@/components/ui/card'
@@ -250,6 +251,119 @@ function Spread({ outcomes }: { outcomes: Outcomes }) {
   )
 }
 
+/**
+ * The earliest age this plan could support — offered, not asserted.
+ *
+ * It is the question people arrive with, and until now the planner only graded
+ * an age they had already picked. But an age is a heavier thing to hand
+ * someone than a percentage: it is a decision that cannot be taken back, and
+ * it rests on every assumption in the plan holding for thirty years. So it is
+ * framed as somewhere to look rather than an answer, and it carries the
+ * reasons it might be wrong rather than putting them in a footnote.
+ */
+function Earliest({
+  earliest,
+  endAge,
+}: {
+  earliest: EarliestRetirement
+  endAge: number
+}) {
+  const bar = Math.round(earliest.target * 100)
+  const pct = (v: number) => `${Math.round(v * 100)}%`
+
+  if (earliest.age === null) {
+    return (
+      <Card className="p-5 gap-2 border-l-4 border-l-destructive">
+        <p className="text-sm font-medium text-foreground text-pretty">
+          No retirement age between {earliest.searchedFrom} and{' '}
+          {earliest.searchedTo} reaches {bar}% on these figures.
+        </p>
+        <p className="text-xs text-muted-foreground text-pretty">
+          Working longer alone does not fix this plan — the changes below will
+          have to come from saving, spending, or both. Your{' '}
+          {earliest.chosenAge} comes out at {pct(earliest.chosenConfidence)}.
+        </p>
+      </Card>
+    )
+  }
+
+  const earlier = earliest.yearsEarlier
+  const headline =
+    earlier > 0
+      ? `You could look at retiring at ${earliest.age}`
+      : earlier < 0
+        ? `This plan reaches ${bar}% at ${earliest.age}, not ${earliest.chosenAge}`
+        : `${earliest.chosenAge} is the earliest this plan reaches ${bar}%`
+
+  return (
+    <Card className="p-5 gap-3 border-l-4 border-l-primary">
+      <div className="flex flex-col gap-1">
+        <p className="text-xs font-medium uppercase tracking-wider text-primary">
+          Worth exploring
+        </p>
+        <p className="font-serif text-lg font-medium text-foreground text-pretty">
+          {headline}
+        </p>
+        <p className="text-sm text-muted-foreground text-pretty">
+          {earlier > 0 ? (
+            <>
+              {earlier} {earlier === 1 ? 'year' : 'years'} earlier than the{' '}
+              {earliest.chosenAge} you entered, and it still lasts through{' '}
+              {endAge} in {pct(earliest.confidence)} of runs — against{' '}
+              {pct(earliest.chosenConfidence)} at {earliest.chosenAge}.
+            </>
+          ) : earlier < 0 ? (
+            <>
+              Your {earliest.chosenAge} comes out at{' '}
+              {pct(earliest.chosenConfidence)}, below the {bar}% this planner
+              treats as sound. Waiting to {earliest.age} reaches{' '}
+              {pct(earliest.confidence)}.
+            </>
+          ) : (
+            <>
+              Retiring any earlier drops below {bar}%. At {earliest.age} it
+              lasts through {endAge} in {pct(earliest.confidence)} of runs.
+            </>
+          )}
+        </p>
+      </div>
+
+      <ul className="flex flex-col gap-1.5 border-t border-border pt-3">
+        <Goal label="It is a probability">
+          {pct(earliest.confidence)} means about {Math.round((1 - earliest.confidence) * 10)} in
+          10 simulated markets still ran out of money. A number that clears a
+          bar is not a promise, and {bar}% is this planner&apos;s choice of bar,
+          not a rule.
+        </Goal>
+        <Goal label="It assumes everything else holds">
+          The spending you entered, the returns you assumed, the Social Security
+          you expect, and contributions continuing until that age. Change any of
+          them and this age moves.
+        </Goal>
+        {earliest.beforeMedicare && (
+          <Goal label="Before 65 you buy your own cover">
+            Medicare has not started, so health insurance comes out of the same
+            savings — priced on the Tax tab, but premiums vary a great deal by
+            where you live. Check a real quote before treating this age as
+            reachable.
+          </Goal>
+        )}
+        {earliest.beforePenaltyFree && (
+          <Goal label="Before 59½ the 401(k) costs more">
+            A withdrawal from it carries an extra 10%. The projection charges
+            it, so this age already accounts for it — but it is the reason
+            retiring early leans hard on whatever sits outside the 401(k).
+          </Goal>
+        )}
+        <Goal label="What to do with it">
+          Change the retirement age above to try it. Nothing here has been
+          applied — this is the same plan, run again at a different age.
+        </Goal>
+      </ul>
+    </Card>
+  )
+}
+
 function Stat({
   label,
   value,
@@ -298,10 +412,12 @@ export function PlanSummary({
   monteCarlo,
   suggestions,
   claiming,
+  earliest,
 }: {
   inputs: PlanInputs
   result: PlanResult
   monteCarlo: MonteCarloResult
+  earliest: EarliestRetirement | null
   suggestions: Suggestion[]
   claiming: ClaimComparison | null
 }) {
@@ -330,7 +446,9 @@ export function PlanSummary({
   // happened to. A plan that survives 9 runs in 10 is a different proposition
   // from one that survives 5, and a single path cannot tell them apart.
   const success = Math.round(monteCarlo.successRate * 100)
-  const lasts = success >= 80
+  // The same bar the suggestions aim at, rather than a second one written out
+  // in digits beside it.
+  const lasts = monteCarlo.successRate >= TARGET_CONFIDENCE
 
   /**
    * What the projection itself says, as distinct from the simulations.
@@ -409,6 +527,8 @@ export function PlanSummary({
           )}
         </div>
       </Card>
+
+      {earliest && <Earliest earliest={earliest} endAge={inputs.endAge} />}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         <Stat

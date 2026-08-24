@@ -39,6 +39,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildInsights } from '@/lib/insights'
 import { compareConversions, type ConversionComparison } from '@/lib/conversions'
+import { earliestRetirement } from '@/lib/earliest'
 import { Save, Check, CopyPlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -155,6 +156,12 @@ export function RetirementPlanner({
   // importantly — the two must quote the same figure. They used not to.
   const conversions = useMemo(
     () => (inputs ? compareConversions(inputs) : null),
+    [inputs],
+  )
+  // The question the homepage asks. Bisected rather than swept, so it costs a
+  // handful of market runs rather than thirty.
+  const earliest = useMemo(
+    () => (inputs ? earliestRetirement(inputs) : null),
     [inputs],
   )
   // Only worth solving when the plan is short; a healthy one pays nothing.
@@ -315,6 +322,7 @@ export function RetirementPlanner({
             monteCarlo={monteCarlo}
             suggestions={suggestions}
             claiming={claiming}
+            earliest={earliest}
           />
         )}
 

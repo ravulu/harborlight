@@ -4,8 +4,19 @@ import { runMonteCarlo } from '@/lib/monte-carlo'
 import { MAX_CLAIM_AGE, MIN_CLAIM_AGE, benefitFactor } from '@/lib/social-security'
 import { taxableSocialSecurity } from '@/lib/tax'
 
-/** The confidence a suggestion aims to reach: the low end of the usual band. */
-export const TARGET_CONFIDENCE = 0.8
+/**
+ * The confidence a plan has to reach before this app will call it sound.
+ *
+ * Ninety per cent, not eighty. The difference matters most where the app is
+ * suggesting a retirement age rather than grading one somebody chose: telling
+ * a person they can stop working is a heavier thing to say than telling them
+ * their plan looks healthy, and one run in ten failing is already a great deal
+ * of risk to carry into a decision that cannot be taken back.
+ *
+ * One number, used everywhere, so the bar a suggestion aims at and the bar a
+ * plan is judged against cannot drift apart.
+ */
+export const TARGET_CONFIDENCE = 0.9
 
 /** Enough runs to rank options; the headline figure is still the full run. */
 const PROBE_RUNS = 800

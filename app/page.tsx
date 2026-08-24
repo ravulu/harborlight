@@ -70,7 +70,11 @@ export default async function HomePage() {
                 bought it. The greeting is the headline rather than a pill above
                 one, because a pill reads as decoration and gets skipped. */}
             <h1 className="font-serif text-4xl font-medium leading-tight text-foreground text-balance sm:text-5xl lg:text-6xl">
-              {greeting ? `${greeting}.` : 'Know exactly when you can retire.'}
+              {/* Not "know exactly": the answer is a probability across ten
+                  thousand simulated markets, and a headline that promises
+                  certainty is one the product spends the rest of the page
+                  walking back. */}
+              {greeting ? `${greeting}.` : 'See when you could retire.'}
             </h1>
             <p className="max-w-md text-lg text-muted-foreground text-pretty">
               {isAuthed
