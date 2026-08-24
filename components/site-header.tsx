@@ -1,13 +1,90 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter, usePathname } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
 import { clearDraftCookie } from '@/lib/planner-draft'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Anchor } from 'lucide-react'
+import { Anchor, Menu as MenuIcon } from 'lucide-react'
 import { FeedbackDialog } from '@/components/feedback-dialog'
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+} from '@/components/ui/menu'
 import { cn } from '@/lib/utils'
+
+
+/**
+ * Everything the wide header shows in a row, for screens that have no room
+ * for one.
+ *
+ * The alternative the header used to run was hiding items by breakpoint until
+ * the line fitted — which meant the narrowest phones lost the pages most worth
+ * finding. A menu costs one tap and loses nothing.
+ */
+function NavMenu({
+  isAuthed,
+  pathname,
+  onSignOut,
+}: {
+  isAuthed: boolean
+  pathname: string
+  onSignOut: () => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  const item = (href: string, label: string) => (
+    <MenuItem
+      key={href}
+      render={<Link href={href} />}
+      className={cn(
+        pathname === href && 'font-medium text-foreground',
+        pathname !== href && 'text-muted-foreground',
+      )}
+      onClick={() => setOpen(false)}
+    >
+      {label}
+    </MenuItem>
+  )
+
+  return (
+    <Menu open={open} onOpenChange={setOpen}>
+      <MenuTrigger
+        aria-label="Menu"
+        className="flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring lg:hidden"
+      >
+        <MenuIcon className="size-5" />
+      </MenuTrigger>
+      <MenuContent>
+        {item('/planner', 'Retirement Planner')}
+        {item('/goal', 'Savings Estimator')}
+        {item('/faq', 'FAQ')}
+        {isAuthed && item('/dashboard', 'My plans')}
+        <MenuSeparator />
+        {/* Closed first: the dialog and the menu both want the focus, and a
+            menu still open behind a modal traps it. */}
+        <MenuItem onClick={() => setOpen(false)} className="p-0">
+          <FeedbackDialog className="w-full justify-start px-3 py-2" />
+        </MenuItem>
+        {isAuthed && (
+          <MenuItem
+            onClick={() => {
+              setOpen(false)
+              onSignOut()
+            }}
+            className="text-muted-foreground"
+          >
+            Sign out
+          </MenuItem>
+        )}
+      </MenuContent>
+    </Menu>
+  )
+}
 
 export function SiteHeader({ isAuthed }: { isAuthed: boolean }) {
   const router = useRouter()
@@ -21,7 +98,7 @@ export function SiteHeader({ isAuthed }: { isAuthed: boolean }) {
     router.refresh()
   }
 
-  const navLink = (href: string, label: string, extra?: string) => (
+  const navLink = (href: string, label: React.ReactNode, extra?: string) => (
     <Link
       href={href}
       className={cn(
@@ -46,22 +123,22 @@ export function SiteHeader({ isAuthed }: { isAuthed: boolean }) {
           </span>
         </Link>
 
-        {/* Tighter on the narrowest screens so every item fits: with the
-            gaps at 4 the row ran 3px past a 390px viewport. */}
-        <nav className="ml-auto flex shrink-0 items-center gap-3 sm:gap-6">
-          {navLink('/planner', 'Planner')}
+        {/* The full row, once there is room for it. Below `lg` every item
+            moves into the menu instead, where each can have its whole name and
+            nothing has to be shortened or dropped to make the line fit. */}
+        <nav className="ml-auto hidden shrink-0 items-center gap-6 lg:flex">
+          {navLink('/planner', 'Retirement Planner')}
           {/* Linked site-wide rather than from the footer alone: a page every
               other page points at is one a crawler treats as worth reading,
               and it answers the questions people arrive with. */}
-          {/* Below 390px the row runs past the edge — a 360px phone is still
-              a phone. Hidden by CSS rather than dropped, so it stays in the
-              markup, and every footer carries it anyway. */}
-          {navLink('/faq', 'FAQ', 'max-[389px]:hidden')}
+          {navLink('/goal', 'Savings Estimator')}
+          {navLink('/faq', 'FAQ')}
           {isAuthed && navLink('/dashboard', 'My plans')}
           <FeedbackDialog />
         </nav>
 
-        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2 lg:ml-0">
+          <NavMenu isAuthed={isAuthed} pathname={pathname} onSignOut={handleSignOut} />
           {isAuthed ? (
             <Button variant="ghost" size="sm" onClick={handleSignOut}>
               Sign out

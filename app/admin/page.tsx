@@ -1,5 +1,6 @@
 import { PlanLookup } from './plan-lookup'
 import { FeedbackRange } from './feedback-range'
+import { Usage } from './usage'
 
 export default function AdminPage() {
   return (
@@ -9,9 +10,11 @@ export default function AdminPage() {
           Support tools
         </h1>
         <p className="text-sm text-muted-foreground">
-          Look up an account&apos;s plans, and read what people have sent in.
+          See where visits get to, look up an account&apos;s plans, and read
+          what people have sent in.
         </p>
       </div>
+      <Usage />
       <PlanLookup />
       <FeedbackRange />
     </>

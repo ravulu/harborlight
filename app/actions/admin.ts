@@ -1,8 +1,8 @@
 'use server'
 
 import { db } from '@/lib/db'
-import { retirementPlans, user, feedback } from '@/lib/db/schema'
-import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
+import { retirementPlans, user, feedback, events } from '@/lib/db/schema'
+import { and, countDistinct, desc, eq, gte, lt, sql } from 'drizzle-orm'
 import { requireAdmin } from '@/lib/admin'
 
 const LIMIT = 200
@@ -154,4 +154,144 @@ export async function feedbackInRange(
     createdAt: r.createdAt.toISOString(),
     ownerEmail: r.ownerEmail ?? null,
   }))
+}
+
+
+// --- Usage ------------------------------------------------------------------
+
+export interface FunnelStep {
+  name: string
+  label: string
+  /** Distinct visits that reached this step. */
+  visits: number
+  /** Share of the visits that landed at all. */
+  share: number
+}
+
+export interface UsageSummary {
+  from: string
+  to: string
+  visits: number
+  steps: FunnelStep[]
+  /** Visits that saw one page and nothing else. */
+  bounced: number
+  bounceRate: number
+  /** Visits that never signed in, and how far they got. */
+  anonymousVisits: number
+  anonymousCompleted: number
+  /** Where the visits came from, most common first. */
+  referrers: { source: string; visits: number }[]
+  /** The most-seen pages. */
+  pages: { path: string; visits: number }[]
+  /** Roughly where visits came from. Country only — no address is stored. */
+  places: { country: string; region: string; city: string; visits: number }[]
+}
+
+/** Read in order, so the drop between any two is the interesting number. */
+const FUNNEL: { name: string; label: string }[] = [
+  { name: 'page_view', label: 'Landed' },
+  { name: 'plan_started', label: 'Typed a figure' },
+  { name: 'plan_completed', label: 'Saw a projection' },
+  { name: 'plan_saved', label: 'Saved a plan' },
+]
+
+/**
+ * Where visits get to, and where they stop.
+ *
+ * Counted in distinct visits rather than rows: someone who opened the planner
+ * six times is one person deciding, not six. A bounce is a visit with a single
+ * event and nothing after it, which is why nothing has to be recorded when
+ * somebody leaves — leaving is the absence of a next row.
+ */
+export async function getUsage(from: string, to: string): Promise<UsageSummary> {
+  await requireAdmin('/admin')
+  const start = new Date(from)
+  const end = new Date(to)
+  end.setDate(end.getDate() + 1)
+  const window = and(gte(events.createdAt, start), lt(events.createdAt, end))
+
+  const [{ visits = 0 } = {}] = await db
+    .select({ visits: countDistinct(events.session) })
+    .from(events)
+    .where(window)
+
+  const byName = await db
+    .select({ name: events.name, visits: countDistinct(events.session) })
+    .from(events)
+    .where(window)
+    .groupBy(events.name)
+
+  const reached = new Map(byName.map((r) => [r.name, r.visits]))
+
+  // A visit with exactly one row saw a page and went no further.
+  const [{ bounced = 0 } = {}] = await db
+    .select({ bounced: sql<number>`count(*)::int` })
+    .from(
+      db
+        .select({ session: events.session })
+        .from(events)
+        .where(window)
+        .groupBy(events.session)
+        .having(sql`count(*) = 1`)
+        .as('single'),
+    )
+
+  const [{ anon = 0 } = {}] = await db
+    .select({ anon: countDistinct(events.session) })
+    .from(events)
+    .where(and(window, eq(events.isAuthed, false)))
+
+  const [{ anonDone = 0 } = {}] = await db
+    .select({ anonDone: countDistinct(events.session) })
+    .from(events)
+    .where(
+      and(window, eq(events.isAuthed, false), eq(events.name, 'plan_completed')),
+    )
+
+  const referrers = await db
+    .select({ source: events.referrer, visits: countDistinct(events.session) })
+    .from(events)
+    .where(and(window, sql`${events.referrer} <> ''`))
+    .groupBy(events.referrer)
+    .orderBy(desc(countDistinct(events.session)))
+    .limit(10)
+
+  const pages = await db
+    .select({ path: events.path, visits: countDistinct(events.session) })
+    .from(events)
+    .where(and(window, eq(events.name, 'page_view')))
+    .groupBy(events.path)
+    .orderBy(desc(countDistinct(events.session)))
+    .limit(10)
+
+  const places = await db
+    .select({
+      country: events.country,
+      region: events.region,
+      city: events.city,
+      visits: countDistinct(events.session),
+    })
+    .from(events)
+    .where(and(window, sql`${events.country} <> ''`))
+    .groupBy(events.country, events.region, events.city)
+    .orderBy(desc(countDistinct(events.session)))
+    .limit(12)
+
+  return {
+    from,
+    to,
+    visits,
+    steps: FUNNEL.map((f) => ({
+      ...f,
+      visits: reached.get(f.name) ?? 0,
+      share: visits > 0 ? (reached.get(f.name) ?? 0) / visits : 0,
+    })),
+    bounced,
+    bounceRate: visits > 0 ? bounced / visits : 0,
+    anonymousVisits: anon,
+    anonymousCompleted: anonDone,
+    referrers,
+    pages,
+    places,
+  }
 }

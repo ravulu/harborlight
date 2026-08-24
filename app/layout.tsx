@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { headers } from 'next/headers'
 import { auth } from '@/lib/auth'
 import { SessionGuard } from '@/components/session-guard'
+import { UsageTracker } from '@/components/usage-tracker'
 import { Fraunces, Geist } from 'next/font/google'
 import './globals.css'
 import { cn } from "@/lib/utils";
@@ -71,6 +72,7 @@ export default async function RootLayout({
       <body className="antialiased font-sans">
         {/* Renders nothing; ends a session whose browser has already closed. */}
         <SessionGuard isAuthed={!!session?.user} />
+        <UsageTracker />
         {children}
       </body>
     </html>

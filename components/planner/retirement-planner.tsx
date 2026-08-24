@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'next/navigation'
 import {
   EMPTY_DRAFT,
+  MONEY_FIELDS,
   missingRequired,
   simulate,
   toDraft,
@@ -39,23 +40,11 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildInsights } from '@/lib/insights'
 import { compareConversions, type ConversionComparison } from '@/lib/conversions'
+import { record } from '@/lib/usage'
 import { earliestRetirement } from '@/lib/earliest'
 import { Save, Check, CopyPlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-/**
- * The value once it has stopped changing for `ms`. Used to keep expensive work
- * off the typing path; the timeout means the state change is never synchronous
- * inside the effect.
- */
-function useSettled<T>(value: T, ms: number): T {
-  const [settled, setSettled] = useState(value)
-  useEffect(() => {
-    const id = setTimeout(() => setSettled(value), ms)
-    return () => clearTimeout(id)
-  }, [value, ms])
-  return settled
-}
+import { useSettled } from '@/lib/use-settled'
 
 // Only the two the projection cannot start without are named here; the rest
 // count as none when blank, so they are never asked for.
@@ -145,6 +134,18 @@ export function RetirementPlanner({
   // one recompute per pause instead of one per character. The whole draft is
   // held back rather than the simulation alone, so the results section stays
   // consistent with itself instead of tiles moving while the chart lags.
+  /**
+   * Where a visit got to, for the funnel — a milestone reached, never a figure
+   * entered. `once` because both of these fire from render-driven effects that
+   * would otherwise repeat on every keystroke.
+   */
+  useEffect(() => {
+    // At least one of the figures the form asks for has been filled in.
+    if (missingRequired(draft).length < MONEY_FIELDS.length) {
+      record('plan_started', undefined, true)
+    }
+  }, [draft])
+
   const settledDraft = useSettled(draft, 250)
   const stale = settledDraft !== draft
 
@@ -177,6 +178,10 @@ export function RetirementPlanner({
   const claiming = useMemo(() => (inputs ? compareClaimAges(inputs) : null), [inputs])
   const missing = missingRequired(settledDraft)
 
+  useEffect(() => {
+    if (result) record('plan_completed', undefined, true)
+  }, [result])
+
   const persist = useCallback(
     (plan: PlanInputs) => {
       startTransition(async () => {
@@ -187,6 +192,7 @@ export function RetirementPlanner({
         }
         // The plan is stored now, so the draft has served its purpose.
         clearDraftCookie()
+        record('plan_saved')
         setSaved(true)
         setTimeout(() => setSaved(false), 2000)
         router.refresh()

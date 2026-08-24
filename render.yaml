@@ -40,6 +40,11 @@ services:
       - key: ADMIN_EMAILS
         sync: false
 
+      # Visits from these addresses are not recorded. Admins are excluded by
+      # account already; this covers signed-out testing from your own machine.
+      - key: ANALYTICS_EXCLUDE_IPS
+        sync: false
+
       # Per instance. Supabase's session pooler allows few connections on the
       # smaller plans, and this multiplies by instance count.
       - key: DATABASE_POOL_MAX

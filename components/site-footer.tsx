@@ -21,10 +21,13 @@ export function SiteFooter() {
         </div>
         <nav className="flex items-center gap-4">
           <Link href="/planner" className="transition-colors hover:text-foreground">
-            Retirement calculator
+            Retirement Planner
           </Link>
           {/* Linked from every page that has a footer: an answers page nothing
               points at is one nothing finds. */}
+          <Link href="/goal" className="transition-colors hover:text-foreground">
+            Savings Estimator
+          </Link>
           <Link href="/faq" className="transition-colors hover:text-foreground">
             FAQ
           </Link>

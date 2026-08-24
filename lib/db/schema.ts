@@ -7,6 +7,7 @@ import {
   integer,
   real,
   uniqueIndex,
+  index,
 } from 'drizzle-orm/pg-core'
 
 // --- Better Auth required tables -------------------------------------------
@@ -169,3 +170,55 @@ export const feedback = pgTable('feedback', {
 
 export type Feedback = typeof feedback.$inferSelect
 export type NewFeedback = typeof feedback.$inferInsert
+
+// --- Usage ------------------------------------------------------------------
+
+/**
+ * What happened, not who it happened to.
+ *
+ * Enough to see where people give up — landed, opened the planner, filled it
+ * in, saw an answer, signed up — without any figure anybody typed. The FAQ
+ * promises that the projection is computed on the visitor's own device and not
+ * sent anywhere, and that promise is worth more than knowing what balances
+ * people enter.
+ *
+ * `session` is a random id held in sessionStorage, so it lasts one browser run
+ * and cannot follow anyone across days or sites. It identifies a visit, not a
+ * person. Nothing here needs a cookie, and so nothing here needs a banner.
+ */
+export const events = pgTable(
+  'events',
+  {
+    id: serial('id').primaryKey(),
+    /** One browser run. Not a person, and not persisted past the tab. */
+    session: text('session').notNull(),
+    /** One of a fixed list; anything else is rejected before it reaches here. */
+    name: text('name').notNull(),
+    path: text('path').notNull().default(''),
+    /** Read from the session server-side, never trusted from the caller. */
+    isAuthed: boolean('isAuthed').notNull().default(false),
+    /** Where the visit came from, recorded once at the start of a run. */
+    referrer: text('referrer').notNull().default(''),
+    /**
+     * Roughly where in the world, from the edge headers the host adds.
+     *
+     * The address those headers were derived from is read to decide whether to
+     * record the visit at all, and then discarded. An IP address is personal
+     * data; a country is not, and a country is what the question "where are
+     * people coming from" actually wants.
+     */
+    country: text('country').notNull().default(''),
+    region: text('region').notNull().default(''),
+    city: text('city').notNull().default(''),
+    createdAt: timestamp('createdAt').notNull().defaultNow(),
+  },
+  (t) => [
+    // The funnel counts distinct sessions per event name over a date range,
+    // and a bounce is a session with one row. Both walk these two.
+    index('events_session_idx').on(t.session),
+    index('events_name_created_idx').on(t.name, t.createdAt),
+  ],
+)
+
+export type Event = typeof events.$inferSelect
+export type NewEvent = typeof events.$inferInsert

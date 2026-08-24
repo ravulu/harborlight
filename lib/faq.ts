@@ -17,7 +17,7 @@ export interface Qa {
 export const FAQ: Qa[] = [
   {
     q: 'When can I retire?',
-    a: 'Enter your age, your balances, what you put away each month and the spending you want in retirement. Harborlight projects the years ahead and reports the share of simulated market outcomes in which the money lasts. Move the retirement age until that share is one you are comfortable with — most people settle somewhere between 85% and 95% rather than chasing 100%, which usually means underspending a whole life to insure against a future that did not happen.',
+    a: 'Enter your age, your balances, what you put away each month and the spending you want in retirement. Harborlight projects the years ahead and reports the share of simulated market outcomes in which the money lasts. It also searches for the earliest age your plan could support — the youngest age at which nine runs in ten still leave money at the end — and shows it as somewhere to look rather than an answer, with the reasons it might be wrong beside it. You can still move the retirement age yourself and watch the share change; the suggestion is a starting point, not a verdict. Chasing 100% is not the goal, and usually means underspending a whole life to insure against a future that did not happen.',
   },
   {
     q: 'How long will my money last in retirement?',
@@ -29,7 +29,7 @@ export const FAQ: Qa[] = [
   },
   {
     q: 'What is a Monte Carlo retirement simulation, and why use one?',
-    a: 'A single average return hides the thing that decides most retirements: the order the good and bad years arrive in. Two retirements with identical average returns end very differently if one begins with a crash. Harborlight runs 10,000 simulated futures, each with its own random sequence of returns drawn from the return and volatility you set, and reports how many of them your plan survived. That percentage is the confidence figure — the share of runs whose money lasted, not a guarantee about yours.',
+    a: 'A single average return hides the thing that decides most retirements: the order the good and bad years arrive in. Two retirements with identical average returns end very differently if one begins with a crash. Harborlight runs 10,000 simulated futures, each with its own random sequence of returns drawn from the return and volatility you set, and reports how many of them your plan survived. That percentage is the confidence figure — the share of runs whose money lasted, not a guarantee about yours. Harborlight treats 90% as the bar: above it a plan is marked as holding up, below it the planner offers changes that would reach it, and the retirement age it suggests is the earliest that clears it. That number is a choice rather than a law — some planners use 80%, some 95% — and it is worth knowing which one you are being judged against. At 90%, roughly one simulated market in ten still ran the money out.',
   },
   {
     q: 'What is a safe withdrawal rate, and does the 4% rule apply to me?',

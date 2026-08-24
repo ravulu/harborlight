@@ -94,6 +94,16 @@ export default async function HomePage() {
               >
                 {isAuthed ? 'My plans' : 'Create free account'}
               </Link>
+              {/* The lighter way in. Somebody who is not ready to build a
+                  whole projection will still answer "what would it take to
+                  have a million", and that page hands them across when they
+                  are. */}
+              <Link
+                href="/goal"
+                className="text-sm font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+              >
+                Or: what would it take to save $1M?
+              </Link>
             </div>
           </div>
 

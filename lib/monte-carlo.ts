@@ -83,9 +83,25 @@ export interface MonteCarloYear {
  * A tenth either way is a bound you can act on, and it is the same band the
  * chart shades.
  */
+/**
+ * The percentiles the three points of `Outcomes` are taken at.
+ *
+ * Named so the pages that quote them can say what they mean rather than
+ * describing them in words that might drift from the arithmetic. `low` is the
+ * tenth percentile — nine runs in ten finished above it — which is what makes
+ * it the figure to plan against rather than the one to expect.
+ */
+export const OUTCOME_PERCENTILES = { low: 0.1, median: 0.5, high: 0.9 } as const
+
+/** The share of runs that beat `Outcomes.low`. Ninety per cent, as a fraction. */
+export const LOW_CONFIDENCE = 1 - OUTCOME_PERCENTILES.low
+
 export interface Outcomes {
+  /** The tenth percentile: nine runs in ten ended above this. */
   low: number
+  /** The middle: half ended above, half below. */
   median: number
+  /** The ninetieth: only one run in ten ended above this. */
   high: number
 }
 
@@ -102,9 +118,9 @@ export interface MonteCarloResult {
 
 /** The three points the tiles quote, from an already-sorted set of runs. */
 const outcomesOf = (sorted: Float64Array): Outcomes => ({
-  low: percentile(sorted, 0.1),
-  median: percentile(sorted, 0.5),
-  high: percentile(sorted, 0.9),
+  low: percentile(sorted, OUTCOME_PERCENTILES.low),
+  median: percentile(sorted, OUTCOME_PERCENTILES.median),
+  high: percentile(sorted, OUTCOME_PERCENTILES.high),
 })
 
 /** No spread to report — every run agrees, so all three points are the same. */
