@@ -3,20 +3,22 @@ import type { MonteCarloResult } from '@/lib/monte-carlo'
 import { FEDERAL, CAPITAL_GAINS, taxableSocialSecurity } from '@/lib/tax'
 import { benefitFactor, MAX_CLAIM_AGE } from '@/lib/social-security'
 import { TARGET_CONFIDENCE } from '@/lib/suggestions'
+import { rmdAge } from '@/lib/rmd'
+import {
+  LOOKBACK_YEARS,
+  MEDICARE_AGE,
+  irmaaTierFor,
+  roomBelowNextTier,
+} from '@/lib/irmaa'
+import type { ConversionComparison } from '@/lib/conversions'
 
 /**
- * The age required minimum distributions begin, which SECURE 2.0 sets by birth
- * year rather than by a single number: 73 for 1951 to 1959, 75 for 1960 on.
- * Most people planning a retirement today are in the second group, so quoting
- * 73 at everyone would be wrong for the majority of them.
+ * Re-exported so the planner's inputs panel, which has always imported it from
+ * here, keeps working. The rule itself lives with the rest of the
+ * distribution logic in `lib/rmd.ts`, where the projection reads it too — one
+ * copy, so the prose on the page and the arithmetic under it cannot drift.
  */
-export function rmdAge(currentAge: number, thisYear: number): number {
-  const birthYear = thisYear - currentAge
-  return birthYear >= 1960 ? 75 : 73
-}
-
-/** Uniform Lifetime Table divisor at the first RMD age. */
-const RMD_DIVISOR: Record<number, number> = { 73: 26.5, 75: 24.6 }
+export { rmdAge }
 
 export interface Insight {
   key: string
@@ -45,6 +47,19 @@ export function buildInsights(
   inputs: PlanInputs,
   result: PlanResult,
   monteCarlo: MonteCarloResult,
+  /**
+   * The modelled conversion ladder, when the caller has it.
+   *
+   * Passed in rather than worked out here because the tax tab already has it,
+   * and building it means a sweep of simulations plus a market run for every
+   * row it shows. More to the point, two answers to the same question is the
+   * problem this argument exists to end: this card used to quote the room
+   * below the 22% bracket in the first retirement year, which is a different
+   * and worse number than the one the tax tab now solves for — it fits one
+   * year rather than the plan. A reader saw both and had no way to know which
+   * to believe.
+   */
+  conversions?: ConversionComparison | null,
 ): Insight[] {
   const out: Insight[] = []
   const money = (v: number) =>
@@ -83,21 +98,34 @@ export function buildInsights(
   // 1. The years between stopping work and RMDs are usually the emptiest
   // income years of a life, and the only ones where the lower brackets are
   // free to be filled on purpose.
-  const gapYears = Math.max(0, startRmd - retireAge)
-  const topOf12 = fed.brackets.find((b) => b.rate === 22)?.from ?? 0
-  const bracketRoom = Math.max(0, topOf12 - ordinaryTaxable)
-  if (deferredNow > 50_000 && gapYears >= 2 && bracketRoom > 5_000) {
+  if (conversions?.worthwhile) {
+    const { best, taxSaving, rmdReduction, fromAge, toAge } = conversions
     out.push({
       key: 'conversion',
       priority: 40,
-      title: `A ${gapYears}-year window to move money into a Roth cheaply`,
+      title: `A ${toAge - fromAge + 1}-year window to move money into a Roth cheaply`,
       body:
-        `Between ${retireAge} and ${startRmd} this plan draws little ordinary income, leaving about ` +
-        `${money(bracketRoom)} a year of room below the 22% bracket. Converting that much of the ` +
-        `${money(deferredNow)} in the 401(k) and IRA each year fills the cheap brackets deliberately ` +
-        `instead of leaving it to be taxed later at whatever rate applies then — and it shrinks the ` +
-        `required distributions waiting at ${startRmd}. The tax is due in the year of the conversion, ` +
-        `so it wants paying from outside the account.`,
+        `Between ${fromAge} and ${toAge} this plan draws little ordinary income, so the low brackets ` +
+        `sit unused. Moving ${money(best.annual)} a year out of the ${money(deferredNow)} in the ` +
+        `401(k) and IRA fills them deliberately: ${money(taxSaving)} less tax across the whole plan, ` +
+        `and a first required distribution ${money(rmdReduction)} smaller than it would otherwise be. ` +
+        `That is the amount that costs least once ${conversions.beforeMedicare ? 'Medicare and ACA premiums are' : 'Medicare is'} counted — moving more ` +
+        `starts costing more, and the Tax tab shows where it turns. The tax is due in the year of ` +
+        `the conversion, so it wants paying from outside the account.` +
+        (conversions.irmaaSaving > 1
+          ? ` It also keeps ${money(conversions.irmaaSaving)} of Medicare surcharges off the plan, ` +
+            `by leaving less to be forced out of the 401(k) in the years those premiums are set from.`
+          : '') +
+        (conversions.beforeMedicare
+          ? ` This window opens before Medicare does, so ACA premiums are priced in as well: until ` +
+            `65 the subsidy that pays most of your premium is means-tested on income, and above ` +
+            `four times the poverty line it stops outright rather than tapering. ` +
+            (conversions.cliffRows.length > 0
+              ? `${conversions.cliffRows.length === 1 ? 'One of the larger amounts on the Tax tab crosses that line and gives up' : `${conversions.cliffRows.length} of the larger amounts on the Tax tab cross that line and give up`} ` +
+                `${money(conversions.cliffCost)} a year of help; ${money(best.annual)} does not, which is ` +
+                `part of why it wins.`
+              : `Nothing worth converting here crosses that line.`)
+          : ''),
     })
   }
 
@@ -130,20 +158,98 @@ export function buildInsights(
     // came out 30% high — $4.41m against the $3.38m the projection was
     // actually holding.
     const grown = atRmd.deferredBalance
-    const firstRmd = grown / (RMD_DIVISOR[startRmd] ?? 26.5)
+    // The projection now takes the distribution itself, so the figure is read
+    // off the row rather than worked out a second time here. Two calculations
+    // of the same number are two chances to disagree with each other, and the
+    // one on the page would be the one nobody could check.
+    const firstRmd = atRmd.requiredDistribution
     if (firstRmd > first.fromDeferred + 1_000) {
+      // What the distributions actually force out over the rest of the plan,
+      // and the part of it the spending never asked for. Read off the
+      // projection, which now takes them, rather than described as something
+      // that might happen later.
+      const rmdYears = years.filter((r) => r.requiredDistribution > 0)
+      const forcedTotal = rmdYears.reduce((a, r) => a + r.requiredDistribution, 0)
+      const surplusTotal = rmdYears.reduce((a, r) => a + r.surplus, 0)
+      const taxFromHere = rmdYears.reduce((a, r) => a + r.taxes, 0)
+
       out.push({
         key: 'rmd',
         priority: 30,
-        title: `Required distributions at ${startRmd} may exceed what you planned to draw`,
+        title: `Required minimum distributions (RMDs) from ${startRmd} take out more than this plan spends`,
         body:
-          `By ${startRmd} the 401(k) and IRA reach ${money(grown)} in today's money, ` +
-          `and the first required distribution would be about ${money(firstRmd)} — against ` +
+          `By ${startRmd} the 401(k) and IRA reach ${money(grown)} in today's money, and the ` +
+          `first RMD is ${money(firstRmd)} — against ` +
           `${first.fromDeferred < 1 ? 'nothing at all, since the other accounts cover the spending' : `the ${money(first.fromDeferred)} this plan draws from them`} ` +
-          `in its first retirement year. ` +
-          `Anything above what you need is still taxable, and it can push more of your Social ` +
-          `Security into tax with it. Drawing more from those accounts earlier, or converting some, ` +
-          `is what keeps that from arriving all at once.`,
+          `in its first retirement year. Across the rest of the plan the rule forces out ` +
+          `${money(forcedTotal)} and costs ${money(taxFromHere)} in tax, of which ` +
+          `${money(surplusTotal)} is money the spending never called for: it is taxed on the way ` +
+          `out and moves to the brokerage account, where its growth is taxable from then on. ` +
+          `Drawing more from those accounts earlier, or converting some, is what keeps that from ` +
+          `arriving all at once.`,
+      })
+    }
+  }
+
+  // 3b. The Medicare surcharge, which is the cost of the income above rather
+  // than a cost of its own — and which nobody sees coming, because it is set
+  // by a tax return filed two years before the bill arrives.
+  const medicareYears = years.filter((r) => r.age >= MEDICARE_AGE)
+  const surcharged = medicareYears.filter((r) => r.irmaaSurcharge > 0)
+
+  if (surcharged.length > 0) {
+    const firstHit = surcharged[0]
+    // What set that first bill: the income two years earlier, which is the
+    // link a reader has no way to make from the table on their own.
+    const causeAge = firstHit.age - LOOKBACK_YEARS
+    const cause = result.rows.find((r) => r.age === causeAge)
+    const worst = surcharged.reduce((a, r) => (r.irmaaSurcharge > a.irmaaSurcharge ? r : a))
+
+    out.push({
+      key: 'irmaa',
+      priority: 32,
+      title: `Medicare charges this plan ${money(result.totalIrmaa)} extra for its income`,
+      body:
+        `From 65, Medicare adds a surcharge to Parts B and D for higher incomes, and it decides ` +
+        `using the tax return from two years earlier. This plan first pays it at ${firstHit.age}, ` +
+        `on the ${money(cause?.magi ?? 0)} of income it had at ${causeAge}` +
+        `${(cause?.requiredDistribution ?? 0) > 0 ? `, most of it the required distribution that year` : ''} — ` +
+        `${
+          surcharged.length === 1
+            ? `${money(firstHit.irmaaSurcharge)}, and that one year is the only one`
+            : worst.irmaaSurcharge > firstHit.irmaaSurcharge
+              ? `${money(firstHit.irmaaSurcharge)} that year, rising to ${money(worst.irmaaSurcharge)} at ${worst.age}, and ${money(result.totalIrmaa)} across the plan`
+              : `${money(firstHit.irmaaSurcharge)} a year, and ${money(result.totalIrmaa)} across the plan`
+        }` +
+        `${inputs.filingStatus === 'married' ? ', counting both of you, since it is charged per person' : ''}. ` +
+        `It is a premium rather than a tax, so it is not in the tax figures above — it is spending, ` +
+        `and the withdrawals have been raised to cover it. The two-year lag is what makes it awkward: ` +
+        `by the time the bill lands, the year that caused it is closed.`,
+    })
+  } else if (medicareYears.length > 0) {
+    // No surcharge — but the thresholds are cliffs, so how close this plan
+    // runs to one is worth knowing even when it never crosses.
+    const tightest = medicareYears.reduce((a, r) =>
+      roomBelowNextTier(r.magi, inputs.filingStatus) <
+      roomBelowNextTier(a.magi, inputs.filingStatus)
+        ? r
+        : a,
+    )
+    const room = roomBelowNextTier(tightest.magi, inputs.filingStatus)
+    if (Number.isFinite(room) && room < 25_000 && tightest.magi > 0) {
+      out.push({
+        key: 'irmaa',
+        priority: 32,
+        title: `About ${money(room)} of headroom before Medicare charges you more`,
+        body:
+          `Medicare adds a surcharge to Parts B and D once income passes a threshold, judged on the ` +
+          `tax return from two years earlier. This plan stays under it, but at ${tightest.age} it ` +
+          `comes within ${money(room)} — and the threshold is a cliff rather than a slope: a dollar ` +
+          `over moves the whole premium up a step, which is about ` +
+          `${money((irmaaTierFor(tightest.magi, inputs.filingStatus) === 0 ? 95.7 : 144.7) * 12)} a ` +
+          `year${inputs.filingStatus === 'married' ? ' each' : ''}. A large withdrawal, a Roth ` +
+          `conversion or a realised gain in one of those years is what would tip it, so it is worth ` +
+          `knowing which years are tight before deciding to take one.`,
       })
     }
   }

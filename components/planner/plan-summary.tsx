@@ -6,6 +6,7 @@ import type { ClaimComparison, Suggestion } from '@/lib/suggestions'
 import { TARGET_CONFIDENCE } from '@/lib/suggestions'
 import { formatCurrency } from '@/lib/retirement'
 import { Card } from '@/components/ui/card'
+import { InfoTip } from './info-tip'
 import { cn } from '@/lib/utils'
 import { taxPhases } from '@/lib/tax'
 import { benefitFactor, spouseMonthlyBenefit } from '@/lib/social-security'
@@ -255,18 +256,21 @@ function Stat({
   sub,
   icon,
   outcomes,
+  info,
 }: {
   label: string
   value: string
   sub?: string
   icon: React.ReactNode
   outcomes?: Outcomes
+  info?: React.ReactNode
 }) {
   return (
     <Card className="p-5 gap-2">
       <div className="flex items-center gap-2 text-muted-foreground">
         <span className="text-primary">{icon}</span>
         <span className="text-xs font-medium uppercase tracking-wider">{label}</span>
+        {info && <InfoTip label={label}>{info}</InfoTip>}
       </div>
       <p className="text-2xl font-semibold tabular-nums text-foreground text-balance">
         {value}
@@ -328,6 +332,19 @@ export function PlanSummary({
   const success = Math.round(monteCarlo.successRate * 100)
   const lasts = success >= 80
 
+  /**
+   * What the projection itself says, as distinct from the simulations.
+   *
+   * The headline above is a distribution over ten thousand market paths. This
+   * is the single run the rest of the page is built from, at the returns the
+   * plan actually states — so when it comes up short it is not bad luck, it is
+   * the plan. Worth saying plainly and separately, and worth sizing: running
+   * out at 84 with a small gap is a different problem from running out at 72
+   * with a large one.
+   */
+  const shortfalls = result.rows.filter((r) => r.unfunded > 0)
+  const worstShortfall = shortfalls.reduce((a, r) => Math.max(a, r.unfunded), 0)
+
   // With a state chosen the projection uses a rate per phase, so quoting one
   // combined figure here would describe only the first stretch.
   const rates = inputs.taxState
@@ -368,6 +385,19 @@ export function PlanSummary({
                 : 'Some runs came up short.'}
           </p>
 
+          {result.depletionAge !== null && (
+            <p className="mt-1 text-sm text-destructive text-pretty">
+              At the returns this plan states, the accounts run out at age{' '}
+              {result.depletionAge} — leaving{' '}
+              {shortfalls.length === 1
+                ? 'one year'
+                : `${shortfalls.length} years`}{' '}
+              unpaid for, up to{' '}
+              {formatCurrency(worstShortfall, { compact: true })} of spending
+              short in the worst of them.
+            </p>
+          )}
+
           {claiming && <Claiming claiming={claiming} />}
 
           {!lasts && (
@@ -389,12 +419,43 @@ export function PlanSummary({
           // "Median" is the right word and the wrong one to put on a tile: it
           // is the middle of the simulated runs, so say that.
           sub={`Middle outcome, ${whenRetired}`}
+          info={
+            <>
+              <p>
+                What the savings come to on the day you stop working, in
+                today&apos;s money — so it is what that pot would buy now, not
+                the larger number it will say on a statement by then.
+              </p>
+              <p>
+                The plan is run {monteCarlo.runs.toLocaleString()} times against
+                different market outcomes.{' '}
+                <span className="font-medium text-foreground">
+                  Middle outcome
+                </span>{' '}
+                means half the runs did better than this and half did worse. The
+                range underneath is where the middle four-fifths of them landed.
+              </p>
+            </>
+          }
         />
         <Stat
           icon={<CalendarClock className="size-4" />}
           label="First-year income"
           value={formatCurrency(result.firstYearRetirementSpending, { compact: true })}
           sub={`From age ${Math.max(inputs.retirementAge, inputs.currentAge)}`}
+          info={
+            <>
+              <p>
+                What this plan spends in the first year of retirement, before
+                tax — the monthly figure you entered, times twelve.
+              </p>
+              <p>
+                It does not move with the markets, which is why there is no
+                range under it: it is a decision you made, not an outcome. What
+                the markets decide is whether the savings can keep paying it.
+              </p>
+            </>
+          }
         />
         <Stat
           icon={<TrendingUp className="size-4" />}
@@ -405,6 +466,19 @@ export function PlanSummary({
               ? 'No working years left to add to it'
               : `Over your ${yearsToRetire} ${yearsToRetire === 1 ? 'year' : 'years'} of saving`
           }
+          info={
+            <>
+              <p>
+                The money you put in yourself between now and retiring — your
+                monthly contribution added up. It is not what that money grows
+                to, and it does not include what you have already saved.
+              </p>
+              <p>
+                Comparing it with the tile above is the point of it: the gap
+                between the two is what the growth did.
+              </p>
+            </>
+          }
         />
         <Stat
           icon={<PiggyBank className="size-4" />}
@@ -412,6 +486,19 @@ export function PlanSummary({
           value={formatCurrency(monteCarlo.peakBalance.median, { compact: true })}
           outcomes={monteCarlo.peakBalance}
           sub="Middle outcome, at its highest"
+          info={
+            <>
+              <p>
+                The most the savings are ever worth, at any point in the plan.
+                For most people that is early in retirement — contributions have
+                stopped, but drawing down has not yet outpaced the growth.
+              </p>
+              <p>
+                If this is much larger than the balance at retirement, the plan
+                is still growing after you stop working.
+              </p>
+            </>
+          }
         />
         <Stat
           icon={<Landmark className="size-4" />}
@@ -430,12 +517,62 @@ export function PlanSummary({
                 }`
               : 'None included'
           }
+          info={
+            <>
+              <p>
+                The whole household&apos;s benefit for a year
+                {spousePaid > 0 ? ', yours and your spouse’s together' : ''} — the
+                monthly figure at full retirement age, adjusted for claiming at{' '}
+                {inputs.socialSecurityAge}, times twelve.
+              </p>
+              <p>
+                <span className="font-medium text-foreground">COLA</span> is the
+                cost-of-living adjustment: the rise Social Security applies each
+                year to keep the benefit up with prices. Yours is set to{' '}
+                {inputs.socialSecurityCola}%. Where that differs from your{' '}
+                {inputs.inflationRate}% inflation rate the benefit slowly gains
+                or loses ground in real terms, which is why the two are entered
+                separately.
+              </p>
+              <p>
+                <span className="font-medium text-foreground">
+                  To find your own figure:
+                </span>{' '}
+                sign in at ssa.gov/myaccount and open your Social Security
+                Statement. It estimates your monthly benefit at 62, at full
+                retirement age, and at 70. The number to enter here is the one
+                at full retirement age — the planner applies the reduction or
+                the increase for the age you actually claim.
+              </p>
+            </>
+          }
         />
         <Stat
           icon={<Receipt className="size-4" />}
           label="Tax on withdrawals"
           value={formatCurrency(result.totalTaxes, { compact: true })}
           sub={taxSub}
+          info={
+            <>
+              <p>
+                Federal and state income tax on everything drawn out of the
+                accounts across the whole of retirement, added up — including
+                the tax on the part of your Social Security that counts as
+                income.
+              </p>
+              <p>
+                Which account a dollar leaves from decides what it costs: a
+                brokerage dollar is taxed only on its gain, a 401(k) dollar in
+                full, and a Roth dollar not at all. The Tax tab shows the
+                working.
+              </p>
+              <p>
+                It is income tax only. Medicare surcharges and health-insurance
+                premiums are costs of having income rather than taxes on it, and
+                they are counted separately on the Tax tab.
+              </p>
+            </>
+          }
         />
       </div>
 

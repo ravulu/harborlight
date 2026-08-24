@@ -173,7 +173,11 @@ export function runMonteCarlo(
       contribution[i] = monthlyContribution * 12
       continue
     }
-    withdrawal[i] = row.withdrawals * inflator
+    // Net of anything a required distribution forced out and the plan put
+    // straight back. That surplus leaves the 401(k), is taxed, and lands in
+    // the brokerage — it never leaves the portfolio, so charging the gross
+    // here would spend it twice and report a plan far more fragile than it is.
+    withdrawal[i] = (row.withdrawals - row.surplus) * inflator
   }
 
   const rand = makeRandom(seed ?? seedFrom(inputs))

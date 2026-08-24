@@ -7,10 +7,14 @@ import {
   SS_THRESHOLDS,
   FEDERAL,
   CAPITAL_GAINS,
+  BRACKET_YEAR,
+  CURRENT_TAX_TABLE,
   type RateEstimate,
   type PhaseSources,
 } from '@/lib/tax'
 import { findState, FILING_STATUSES, type FilingStatus } from '@/lib/state-tax'
+import type { ConversionComparison } from '@/lib/conversions'
+import { CLIFF, MEDICARE_AGE, povertyLine } from '@/lib/aca'
 import { cn } from '@/lib/utils'
 
 const money = (v: number) => formatCurrency(Math.round(v))
@@ -25,10 +29,16 @@ const money = (v: number) => formatCurrency(Math.round(v))
 export function TaxPhases({
   inputs,
   rows,
+  conversions,
 }: {
   inputs: PlanInputs
   /** The projected years, so the 59½ split knows when the 401(k) is drawn. */
   rows: YearRow[]
+  /**
+   * The conversion ladder, worked out once by the planner and shared with the
+   * insight card so the two cannot quote different amounts.
+   */
+  conversions: ConversionComparison | null
 }) {
   const phases = taxPhases(inputs, inputs.taxState, inputs.filingStatus, rows)
   const state = findState(inputs.taxState)
@@ -195,10 +205,30 @@ export function TaxPhases({
                       label={`Federal tax (${p.rates.federal}%)`}
                       value={money(p.totalFederalTax)}
                     />
+                    {/* Inset, because it is a part of the federal figure above
+                        rather than a charge beside it — and shown at all
+                        because it is the one line here that a different
+                        decision removes outright rather than merely reduces. */}
+                    {p.totalPenalty > 0 && (
+                      <Line
+                        label="of which the 10% early-withdrawal penalty"
+                        value={money(p.totalPenalty)}
+                        inset
+                      />
+                    )}
                     <Line
                       label={`State tax (${p.rates.state}%)`}
                       value={money(p.totalStateTax)}
                     />
+                    {/* Beside the tax, never inside it: a Medicare premium is
+                        not a tax, and a total that mixed the two would be a
+                        bill nobody sends. */}
+                    {p.totalIrmaa > 0 && (
+                      <Line
+                        label="Medicare surcharge"
+                        value={money(p.totalIrmaa)}
+                      />
+                    )}
                   </dl>
                   <Why
                     rates={p.rates}
@@ -216,8 +246,25 @@ export function TaxPhases({
         })}
       </div>
 
+      {conversions && (
+        <SuggestedActions conversions={conversions} inputs={inputs} />
+      )}
+
       <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-4 text-xs leading-relaxed text-muted-foreground">
         <p className="font-medium text-foreground">How these were worked out</p>
+        {CURRENT_TAX_TABLE.estimated && (
+          <p className="text-justify hyphens-auto">
+            <span className="font-medium text-foreground">
+              {CURRENT_TAX_TABLE.year} brackets are estimated.
+            </span>{' '}
+            The last published figures held here are {BRACKET_YEAR}&apos;s. Rather
+            than charge {CURRENT_TAX_TABLE.year} income against{' '}
+            {BRACKET_YEAR} thresholds, they have been carried forward at the
+            rate they are normally indexed at — the rates themselves are set by
+            law and have not been touched. Expect the bands to be a little out,
+            and expect nothing at all if the law has changed since.
+          </p>
+        )}
         <p>
           Figures are in today&apos;s dollars. Spending is flat in real terms and
           the brackets are inflation-indexed, so within a stretch the only thing
@@ -474,9 +521,448 @@ function Heading({
   )
 }
 
-function Line({ label, value }: { label: string; value: string }) {
+/**
+ * Things this plan could do, with the numbers behind each one.
+ *
+ * A container rather than a single card: conversions are the first action to
+ * be modelled and will not be the last, and each one belongs in the same place
+ * with the same shape — here is a choice, here is what it costs, here is what
+ * it is worth, here is what we cannot tell you about it.
+ *
+ * Nothing here is applied. The plan above is unchanged whichever row a reader
+ * finds convincing.
+ */
+function SuggestedActions({
+  conversions,
+  inputs,
+}: {
+  conversions: ConversionComparison
+  inputs: PlanInputs
+}) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <h3 className="text-sm font-medium text-foreground">
+          Suggested actions
+        </h3>
+        <p className="text-xs text-muted-foreground text-justify hyphens-auto">
+          Worked out from your figures, and not applied to them. Nothing below
+          changes your plan or is saved with it — each one is a choice you could
+          make, priced against the choice of doing nothing.
+        </p>
+      </div>
+      <RothConversions c={conversions} inputs={inputs} />
+    </div>
+  )
+}
+
+/**
+ * Moving money out of the 401(k) and into a Roth while the low brackets are
+ * empty.
+ *
+ * The whole ladder is shown rather than the winning row alone. The tax answer
+ * is only part of the decision — before 65 a conversion also moves the income
+ * a health-insurance subsidy is judged on, and this projection cannot price
+ * that. Someone weighing the two needs to see what each amount costs, not be
+ * handed a recommendation that only counted one side.
+ */
+function RothConversions({
+  c,
+  inputs,
+}: {
+  c: ConversionComparison
+  inputs: PlanInputs
+}) {
+  const pct = (v: number) => `${Math.round(v * 100)}%`
+  const endAge = inputs.endAge
+  // Named from the table rather than hardcoded, so the note cannot drift from
+  // the brackets the projection actually charged.
+  const bands = FEDERAL[inputs.filingStatus].brackets
+  const lowRate = bands[1]?.rate ?? 12
+  const topRate = bands.at(-1)?.rate ?? 37
+  /** What this row is, in words, under the amount. */
+  const meaning = (o: (typeof c.options)[number]) => {
+    if (o.annual === 0) return 'what your plan does now'
+    if (o.drainsPot) return 'empties the account as fast as allowed'
+    if (c.excessive && o.annual === c.excessive.annual)
+      return 'more than pays for itself'
+    if (o.annual === c.best.annual && c.worthwhile)
+      return 'fills the cheap brackets, no further'
+    return 'a partial conversion'
+  }
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-medium text-foreground">
+          Move money into a Roth between {c.fromAge} and {c.toAge}
+        </p>
+        <p className="text-xs text-muted-foreground text-justify hyphens-auto">
+          A Roth conversion moves money out of your 401(k) or IRA and into a
+          Roth. You pay income tax on it in the year you move it, and nothing on
+          it ever again — no tax when you spend it, and it is not counted in the
+          amounts the government later forces you to withdraw. Between{' '}
+          {c.fromAge} and {c.toAge} your other income is at its lowest, so this
+          is when moving it is cheapest.
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-muted-foreground">
+            <tr className="text-left align-bottom">
+              <th className="py-1.5 pr-3 font-medium">Move each year</th>
+              <th className="px-3 py-1.5 font-medium text-right">
+                Total tax
+                <span className="block text-[10px] font-normal normal-case">
+                  whole plan
+                </span>
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right">
+                Medicare surcharge
+                <span className="block text-[10px] font-normal normal-case">
+                  a year, once it starts
+                </span>
+              </th>
+              {c.beforeMedicare && (
+                <th className="px-3 py-1.5 font-medium text-right">
+                  ACA premiums
+                  <span className="block text-[10px] font-normal normal-case">
+                    a year, after subsidy
+                  </span>
+                </th>
+              )}
+              <th className="px-3 py-1.5 font-medium text-right">
+                Forced out at {c.toAge + 1}
+                <span className="block text-[10px] font-normal normal-case">
+                  first year
+                </span>
+              </th>
+              <th className="px-3 py-1.5 font-medium text-right">
+                Tax-free
+                <span className="block text-[10px] font-normal normal-case">
+                  at the end
+                </span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {c.options.map((o) => {
+              const isBest = o.annual === c.best.annual && c.worthwhile
+              const versus = o.lifetimeTax - c.none.lifetimeTax
+              return (
+                <tr
+                  key={o.annual}
+                  className={cn(
+                    'border-t border-border tabular-nums',
+                    isBest && 'bg-accent/40',
+                  )}
+                >
+                  <td className="py-1.5 pr-3">
+                    <span
+                      className={cn(isBest && 'font-medium text-foreground')}
+                    >
+                      {o.annual === 0
+                        ? 'Nothing'
+                        : o.drainsPot
+                          ? 'All of it'
+                          : money(o.annual)}
+                    </span>
+                    {isBest && (
+                      <span className="ml-2 rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary">
+                        cheapest
+                      </span>
+                    )}
+                    <span className="block text-[11px] font-normal text-muted-foreground">
+                      {meaning(o)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-1.5 text-right text-foreground">
+                    {money(o.lifetimeTax)}
+                    <span
+                      className={cn(
+                        'block text-[11px]',
+                        versus < 0 ? 'text-primary' : 'text-muted-foreground',
+                      )}
+                    >
+                      {o.annual === 0
+                        ? '—'
+                        : versus < 0
+                          ? `${money(-versus)} less`
+                          : `${money(versus)} more`}
+                    </span>
+                  </td>
+                  <td className="px-3 py-1.5 text-right text-foreground">
+                    {o.irmaaPerYear >= 1 ? money(o.irmaaPerYear) : 'none'}
+                    {/* The yearly figure is the one worth comparing; the span
+                        beneath is what turns it back into a lifetime cost, so
+                        neither has to be inferred from the other. */}
+                    <span className="block text-[11px] text-muted-foreground">
+                      {o.irmaaYears === 0
+                        ? 'never charged'
+                        : `${money(o.lifetimeIrmaa)} over ${o.irmaaYears} ${
+                            o.irmaaYears === 1 ? 'year' : 'years'
+                          }`}
+                    </span>
+                  </td>
+                  {c.beforeMedicare && (
+                    <td className="px-3 py-1.5 text-right text-foreground">
+                      <span className={cn(o.crossesCliff && 'text-destructive')}>
+                        {o.acaPerYear >= 1 ? money(o.acaPerYear) : 'none'}
+                      </span>
+                      {/* What the figure above is, said rather than left to be
+                          worked out: the subsidy is the invisible half of the
+                          price, and the row that loses it needs to say so in
+                          money rather than in a word. */}
+                      <span
+                        className={cn(
+                          'block text-[11px]',
+                          o.crossesCliff
+                            ? 'font-medium text-destructive'
+                            : 'text-muted-foreground',
+                        )}
+                      >
+                        {/* How many years actually lose it, not merely whether
+                            any did — a conversion that empties the account in
+                            two years is subsidised in all the rest. */}
+                        {o.acaCliffYears === 0
+                          ? `${money(o.acaSubsidyPerYear)} subsidised`
+                          : o.acaCliffYears === o.acaYears
+                            ? `no subsidy at all`
+                            : `nothing in ${o.acaCliffYears} of ${o.acaYears} years`}
+                      </span>
+                    </td>
+                  )}
+                  <td className="px-3 py-1.5 text-right text-muted-foreground">
+                    {/* An emptied account still carries a fraction of a cent,
+                        and a required distribution on it rounds to $0 — which
+                        reads as a figure rather than as the absence of one. */}
+                    {o.firstRmd >= 1 ? money(o.firstRmd) : 'nothing'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right text-muted-foreground">
+                    {pct(o.endingRothShare)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* A glossary rather than a paragraph. Four columns explained in prose
+          runs to six lines that have to be held in the head at once; the same
+          four explained one at a time can be read in any order, and the one
+          being puzzled over can be found without re-reading the others. */}
+      <div className="flex flex-col gap-2 rounded-md bg-muted/40 p-3 text-xs">
+        <p className="text-muted-foreground text-justify hyphens-auto">
+          Every row is your plan exactly as it stands, changed in one way only —
+          how much you move into the Roth each year — and then run again to the
+          end. What the columns mean:
+        </p>
+        <dl className="flex flex-col gap-2">
+          <Column name="Move each year">
+            How much leaves the 401(k) and IRA each year, every year from{' '}
+            {c.fromAge} to {c.toAge}.
+          </Column>
+          <Column name="Total tax">
+            Every dollar of tax you pay from now until {endAge}, added up. Lower
+            is better. The small figure underneath compares it with moving
+            nothing.
+          </Column>
+          <Column name="Medicare surcharge">
+            Medicare charges people with higher incomes extra for Parts B and D,
+            on top of the ordinary premium — and it decides using your income
+            from <em>two years earlier</em>. Moving money counts as income, so a
+            large move today can raise your premiums the year after next. The
+            figure is what that costs{' '}
+            <span className="font-medium text-foreground">in a year</span> it is
+            charged; underneath is the whole of it, and how many years that is.
+          </Column>
+          {c.beforeMedicare && (
+            <Column name="ACA premiums">
+              Medicare starts at {MEDICARE_AGE}; until then you buy your own
+              cover through the ACA marketplace. The figure is what{' '}
+              <span className="font-medium text-foreground">you</span> would pay
+              in premiums{' '}
+              <span className="font-medium text-foreground">in a year</span>{' '}
+              between {c.fromAge} and {MEDICARE_AGE - 1} — not the price of the
+              plan. The government pays the rest as a subsidy, and the grey line
+              under each figure is how much of it that covers. How the price
+              splits between the two depends on your income for the year, and
+              moving money into a Roth counts as income. Above four times the poverty line — {' '}
+              {money(povertyLine(c.householdSize) * CLIFF)} for a household of{' '}
+              {c.householdSize === 2 ? 'two' : 'one'} — the subsidy stops
+              entirely rather than tapering, which is why this column can leap
+              between one row and the next.
+            </Column>
+          )}
+          <Column name={`Forced out at ${c.toAge + 1}`}>
+            What the government makes you take out of the 401(k) that year,
+            whether you need it or not. Move money now and there is less left to
+            be forced out later.
+          </Column>
+          <Column name="Tax-free at the end">
+            Of whatever is left at {endAge}, the share sitting in the Roth —
+            money you or your heirs can spend without owing anything further on
+            it.
+          </Column>
+        </dl>
+      </div>
+
+      <ul className="flex flex-col gap-2">
+        <Goal label="Why moving everything costs more">
+          {c.everything.lifetimeCost > c.best.lifetimeCost ? (
+            <>
+              Tax rates climb in steps as your income for the year rises — about{' '}
+              {lowRate}% at the bottom, up to {topRate}% at the top. Moving a
+              modest amount each year keeps you on the low steps. Moving the
+              whole account crams years of income into one or two, which pushes
+              that income onto the high steps, so you hand over {topRate}% today
+              on money you could have taken out at {lowRate}% later — and the
+              same spike raises your Medicare premiums two years afterwards.
+              Between them, moving all of it costs{' '}
+              <span className="font-medium text-foreground">
+                {money(c.everything.lifetimeCost - c.best.lifetimeCost)} more
+              </span>{' '}
+              than moving {money(c.best.annual)} a year. The aim is to fill the
+              cheap steps each year and stop.
+            </>
+          ) : (
+            <>
+              On this plan it does not: even moving the whole account keeps you
+              on cheaper steps than the forced withdrawals would meet later.
+              That is unusual, and it happens here because your income stays low
+              throughout.
+            </>
+          )}
+        </Goal>
+
+        {c.irmaaSaving > 1 && (
+          <Goal label="It can lower your premiums too">
+            Moving {money(c.best.annual)} a year leaves less to be forced out of
+            the 401(k) later, so your income in those later years is lower — and
+            that is{' '}
+            <span className="font-medium text-foreground">
+              {money(c.irmaaSaving)} less
+            </span>{' '}
+            in Medicare surcharges across the plan, on top of the tax saved.
+          </Goal>
+        )}
+
+        <Goal label="Where the tax money comes from">
+          You owe the tax in the same year you move the money, and it should be
+          paid from an ordinary savings or brokerage account — not out of the
+          401(k) itself. If you withdraw extra from the 401(k) to cover the
+          bill, that extra is taxed too, and less of your money ends up in the
+          Roth. It still works, but you lose a good part of what you were trying
+          to gain.
+        </Goal>
+      </ul>
+
+      {c.beforeMedicare && (
+        <div className="flex flex-col gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+          <p className="font-medium text-destructive">
+            The cliff in the ACA premiums column
+          </p>
+          <p className="text-justify hyphens-auto">
+            Medicare starts at {MEDICARE_AGE}. Until then most people who have
+            stopped working buy cover on the marketplace, where the government
+            pays part of the premium and how much depends on your income for the
+            year — and moving money into a Roth counts as income. The help does
+            not fade out as you earn more: it stops. For a household of{' '}
+            {c.householdSize === 2 ? 'two' : 'one'} the line is{' '}
+            <span className="font-medium text-foreground">
+              {money(povertyLine(c.householdSize) * CLIFF)}
+            </span>{' '}
+            of income, and a dollar past it costs the entire subsidy — worth{' '}
+            <span className="font-medium text-foreground">
+              {money(c.cliffCost)}
+            </span>{' '}
+            a year to this plan.
+          </p>
+          {c.cliffRows.length > 0 && (
+            <p className="text-justify hyphens-auto">
+              <span className="font-medium text-destructive">
+                {c.cliffRows.length === 1
+                  ? 'One amount above crosses it'
+                  : `${c.cliffRows.length} of the amounts above cross it`}
+                :
+              </span>{' '}
+              {c.cliffRows
+                .map((o) => (o.drainsPot ? 'all of it' : money(o.annual)))
+                .join(', ')}
+              . Those rows are paying full price for cover, which is why their
+              all-in cost jumps rather than climbing.
+            </p>
+          )}
+          <p className="text-justify hyphens-auto">
+            <span className="font-medium text-foreground">
+              Premiums vary by where you live.
+            </span>{' '}
+            The subsidy is worked out against a benchmark plan, and what that
+            plan costs varies by where you live — sometimes by half. The figures
+            here use the national average for your age, which is the right size
+            everywhere and the exact number almost nowhere. Treat the gap
+            between rows as the reliable part, and check your own marketplace
+            quote before acting on the amounts.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** One column of the table above, named and then explained. */
+function Column({
+  name,
+  children,
+}: {
+  name: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-3">
+      <dt className="shrink-0 font-medium text-foreground sm:w-40">{name}</dt>
+      <dd className="flex-1 text-muted-foreground text-justify hyphens-auto">
+        {children}
+      </dd>
+    </div>
+  )
+}
+
+function Goal({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <li className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-foreground/70">
+        {label}
+      </span>
+      <span className="flex-1 text-justify hyphens-auto">{children}</span>
+    </li>
+  )
+}
+
+function Line({
+  label,
+  value,
+  inset,
+}: {
+  label: string
+  value: string
+  /** A component of the line above it rather than a sibling of it. */
+  inset?: boolean
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-baseline justify-between gap-3',
+        inset && 'pl-3 text-xs text-muted-foreground',
+      )}
+    >
       <dt>{label}</dt>
       <dd className="tabular-nums text-foreground/80">{value}</dd>
     </div>

@@ -25,6 +25,7 @@ import { Slider } from '@/components/ui/slider'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ExpenseEstimator } from './expense-estimator'
+import { Field, InfoTip } from './info-tip'
 import { rmdAge } from '@/lib/insights'
 import {
   clamp,
@@ -602,15 +603,17 @@ function AccountTaxNote({
       {parts}{' '}
       {retireAge < 60 && (deferredYear?.age ?? 99) < 60 && (
         <>
-          Drawing on a 401(k) or IRA before 59½ normally costs another 10% on
-          top, which the projection does not charge.{' '}
+          Drawing on a 401(k) or IRA before 59½ costs another 10% on top, and
+          the projection charges it — those years are grossed up to cover it,
+          so they use more of the balance than the ones after.{' '}
         </>
       )}
       {deferredLeft && (
         <>
           Required minimum distributions start at {startRmd} for someone born
-          when you were, and are not modelled: they can force money out of the
-          401(k) faster than this order would choose to, and tax it.
+          when you were: from then on a rising share of the 401(k) comes out
+          and is taxed whether the spending calls for it or not, and anything
+          above what you need moves to the brokerage account.
         </>
       )}
     </p>
@@ -1023,12 +1026,15 @@ function Section({
   summary,
   defaultOpen,
   className,
+  info,
   children,
 }: {
   title: string
   summary: string
   defaultOpen?: boolean
   className?: string
+  /** What this section is, opened from a question mark beside the heading. */
+  info?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
@@ -1050,6 +1056,23 @@ function Section({
           </span>
           <span className="text-sm text-foreground/70 group-open:hidden">{summary}</span>
         </span>
+        {info && (
+          // Clicking a <summary> opens the section — that is the default action
+          // of the click, not a handler — so the question mark has to cancel it
+          // or reading the explanation would collapse what it explains. The
+          // button's own handler has already run by the time this fires.
+          <span
+            className="ml-auto flex shrink-0 items-center"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+            }}
+          >
+            <InfoTip label={title} className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+              {info}
+            </InfoTip>
+          </span>
+        )}
         <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
       <div className="pb-4">{children}</div>
@@ -1199,8 +1222,45 @@ export function PlanInputsPanel({
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <div className="flex flex-col gap-4">
           <Section
-            title="Social Security"
             defaultOpen
+            title="Social Security"
+            info={
+              <>
+                <Field name="Monthly benefit at 67">
+                  the figure at{' '}
+                  <span className="font-medium text-foreground">
+                    full retirement age
+                  </span>{' '}
+                  — 67 for anyone born in 1960 or later — <em>not</em> the amount
+                  at the age you plan to claim. The planner applies the
+                  reduction or the increase itself, so entering the age-70
+                  figure here would count the increase twice.
+                </Field>
+                <Field name="Where to find it">
+                  sign in at ssa.gov/myaccount and open your Social Security
+                  Statement. It shows estimates at 62, at full retirement age
+                  and at 70. Use the middle one.
+                </Field>
+                <Field name="Age you claim">
+                  anywhere from 62 to 70. Claiming at 62 pays about 70% of the
+                  full amount for life; waiting to 70 pays about 124%. The Tax
+                  tab and the summary both compare the ages for you.
+                </Field>
+                <Field name="Annual COLA">
+                  the cost-of-living adjustment — the rise Social Security
+                  applies each year to keep the benefit up with prices. Entered
+                  separately from your inflation rate because the two differ in
+                  practice, and where they do the benefit slowly gains or loses
+                  ground in real terms.
+                </Field>
+                <Field name="Spouse's benefit and claim age">
+                  their own record, on their own timeline. Leave the amount at
+                  zero for a spouse with no record of their own — they are then
+                  paid the spousal share, which cannot start until you have
+                  filed.
+                </Field>
+              </>
+            }
             summary={
               inputs.socialSecurityMonthly === null
                 ? 'Not entered'
@@ -1265,8 +1325,42 @@ export function PlanInputsPanel({
           </Section>
 
           <Section
-            title="Other income"
             defaultOpen
+            title="Other income"
+            info={
+              <>
+                <p>
+                  Money arriving in retirement that is neither Social Security
+                  nor drawn from savings. Every dollar of it is a dollar the
+                  accounts do not have to cover.
+                </p>
+                <Field name="Monthly pension">
+                  in today&apos;s money, like everything else here. Zero if you
+                  have none.
+                </Field>
+                <Field name="Pension COLA">
+                  the cost-of-living adjustment on that pension — and most
+                  private ones have{' '}
+                  <span className="font-medium text-foreground">none</span>,
+                  which is why it defaults to zero. A pension that never rises
+                  loses roughly a third of its buying power over twenty years at
+                  2.5% inflation, so this field matters more than it looks.
+                </Field>
+                <Field name="Other monthly income">
+                  rent, an annuity, part-time work — anything steady. Assumed to
+                  keep pace with inflation, so it holds its value.
+                </Field>
+                <Field name="Starts at">
+                  the age each one begins. A pension that starts later than you
+                  retire leaves a gap the savings have to bridge, which is often
+                  the most expensive stretch of a plan.
+                </Field>
+                <p>
+                  All of it is ordinary income for tax, and it counts towards
+                  how much of your Social Security becomes taxable.
+                </p>
+              </>
+            }
             summary={
               inputs.pensionMonthly === 0 && inputs.otherIncomeMonthly === 0
                 ? 'None'
@@ -1347,8 +1441,54 @@ export function PlanInputsPanel({
         </div>
 
         <Section
-          title="Saving"
           defaultOpen
+          title="Saving"
+          info={
+            <>
+              <p>
+                What you have now, split by how it will be taxed when it comes
+                out — which is the single thing that decides what a dollar of
+                spending actually costs you.
+              </p>
+              <Field name="Brokerage account">
+                an ordinary investment account, taxed as you go. The plan spends
+                it first, because most of it has already been taxed once.
+              </Field>
+              <Field name="…of which is gain">
+                how much of that balance is profit rather than money you put in.
+                When you sell, only the profit is taxed — and at lower
+                capital-gains rates, sometimes at nothing. A $200,000 account you
+                paid $120,000 for is 40% gain. Your brokerage shows this as{' '}
+                <span className="font-medium text-foreground">cost basis</span>{' '}
+                or unrealised gain; if you have no idea, 40% is a fair guess for
+                a long-held account.
+              </Field>
+              <Field name="401(k) and Traditional IRA">
+                never taxed yet, so every dollar out is ordinary income. These
+                are also the accounts the government eventually forces you to
+                empty.
+              </Field>
+              <Field name="Roth IRA">
+                already taxed, so nothing more is ever owed on it. The plan
+                spends it last, and nothing is forced out of it.
+              </Field>
+              <Field name="Monthly contribution">
+                what you add between now and retiring. It goes into the 401(k),
+                which is where most payroll saving lands.
+              </Field>
+              <Field name="Return while saving (nominal)">
+                the growth you assume, <em>before</em> inflation is taken off —
+                which is how returns are normally quoted. Inflation is entered
+                separately and subtracted, so 7% here against 2.5% inflation is
+                about 4.4% of real growth.
+              </Field>
+              <Field name="Volatility">
+                how much those returns swing from year to year. It does not
+                change the average; it decides how wide the range of outcomes
+                is, and so how often the plan survives a bad decade.
+              </Field>
+            </>
+          }
           summary={`${money(
             [
               inputs.brokerageBalance,
@@ -1460,8 +1600,45 @@ export function PlanInputsPanel({
         </Section>
 
         <Section
-          title="Spending"
           defaultOpen
+          title="Spending"
+          info={
+            <>
+              <Field name="Monthly spending in retirement">
+                what that life costs at{' '}
+                <span className="font-medium text-foreground">
+                  today&apos;s prices
+                </span>
+                . Do not inflate it yourself for a future decade — the planner
+                does that. This is spending, not withdrawals: it works out how
+                much has to leave the accounts to leave you this much after tax.
+              </Field>
+              <Field name="Spending as you age">
+                two optional steps, because spending rarely holds flat for
+                thirty years. The usual shape is more early on while you are
+                travelling, less once things slow down, and more again late when
+                care arrives.
+              </Field>
+              <Field name="Changes at / Spend this a month instead">
+                the age the first step takes effect, and the new monthly figure
+                from then on — again in today&apos;s money. It replaces the
+                figure above rather than adding to it.
+              </Field>
+              <Field name="Changes again at / Then this a month">
+                the same for a second step later on. Leave either at zero for no
+                step at all, which is the default.
+              </Field>
+              <Field name="Return in retirement (nominal)">
+                growth before inflation, once you have stopped working. Most
+                people hold something steadier than they did while saving.
+              </Field>
+              <Field name="Inflation rate">
+                how fast prices rise. Everything on the page is shown in
+                today&apos;s money, so this is what converts your figures into
+                the dollars of each year and back again.
+              </Field>
+            </>
+          }
           summary={`${money(inputs.monthlyRetirementSpending)} a month in retirement`}
         >
           <div className="flex flex-col gap-4">
@@ -1522,8 +1699,36 @@ export function PlanInputsPanel({
       </div>
 
       <Section
-        title="Taxes"
         defaultOpen
+        title="Taxes"
+        info={
+          <>
+            <Field name="State">
+              pick one and the planner works the rates out from the real
+              brackets, year by year — federal and state, including how much of
+              your Social Security becomes taxable and what your capital gains
+              cost.
+            </Field>
+            <Field name="Filing status">
+              matters more than people expect. Married brackets are roughly
+              twice as wide, and so are the thresholds for Medicare surcharges
+              and for the health-insurance subsidy before 65.
+            </Field>
+            <Field name="Federal and state tax rate">
+              only used if you would rather set a flat rate by hand than have it
+              derived. It is treated as one levy on withdrawals, so it cannot
+              tell one account from another and the Tax tab has less to show
+              you.
+            </Field>
+            <p>
+              The rates shown are{' '}
+              <span className="font-medium text-foreground">effective</span>, not
+              your top bracket: tax owed divided by the whole withdrawal. The
+              standard deduction and the lower bands are taxed first, so a plan
+              showing 12% can easily be one whose top bracket is 22%.
+            </p>
+          </>
+        }
         summary={`${
           Math.round((inputs.federalTaxRate + inputs.stateTaxRate) * 10) / 10
         }% combined${findState(inputs.taxState) ? `, ${findState(inputs.taxState)!.name}` : ''}`}

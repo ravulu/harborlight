@@ -1,5 +1,17 @@
 import type { FilingStatus } from '@/lib/state-tax'
-import { withdrawForNeed } from '@/lib/tax'
+import {
+  EARLY_WITHDRAWAL_PENALTY_RATE,
+  PENALTY_FREE_AGE,
+  withdrawForNeed,
+} from '@/lib/tax'
+import { requiredDistribution, rmdAge } from '@/lib/rmd'
+import {
+  LOOKBACK_YEARS,
+  MEDICARE_AGE,
+  annualSurcharge,
+  irmaaTableFor,
+  magiOf,
+} from '@/lib/irmaa'
 import { benefitFactor, spouseMonthlyBenefit } from '@/lib/social-security'
 import { usesDerivedRates } from '@/lib/state-tax'
 
@@ -59,6 +71,21 @@ export interface PlanInputs {
   stateTaxRate: number // effective state % on portfolio withdrawals
   taxState: string // two-letter code the rate came from, '' when set by hand
   filingStatus: FilingStatus
+  /**
+   * A Roth conversion schedule: move this much out of the 401(k) and IRA each
+   * year between these ages, paying ordinary income tax on it now so that
+   * nothing is owed on it later.
+   *
+   * Optional, and absent from the input form on purpose. Nothing the user
+   * enters sets these; `compareConversions` fills them on candidate plans it
+   * builds internally, the way `compareClaimAges` varies the claim age. That
+   * keeps a conversion a thing the planner suggests rather than a figure
+   * someone has to commit to before seeing what it does — and it keeps the
+   * stored schema, which has a column per field, untouched.
+   */
+  conversionAnnual?: number
+  conversionFromAge?: number
+  conversionToAge?: number
 }
 
 export interface YearRow {
@@ -85,8 +112,22 @@ export interface YearRow {
   socialSecurity: number
   /** pension plus any other income received this year */
   otherIncome: number
-  /** Gross withdrawal, i.e. including the tax withheld on it. */
+  /**
+   * Gross withdrawal, i.e. including the tax withheld on it. Never more than
+   * the pots held: a year the plan cannot fund shows a smaller withdrawal and
+   * a shortfall beside it, rather than a draw on an empty account.
+   */
   withdrawals: number
+  /**
+   * What this year's spending needed and the pots could not cover, after tax.
+   *
+   * Zero on a plan that funds itself, which is every year of most of them.
+   * Above zero it is the year the plan failed, and it is carried per year
+   * rather than summarised because the size of the gap is the thing worth
+   * showing — coming up $2,000 short at 88 is not the same failure as coming
+   * up $40,000 short at 72.
+   */
+  unfunded: number
   /**
    * Which pot that withdrawal came out of. Kept per year because the answer
    * changes as the pots empty in turn, and the tax changes with it.
@@ -94,10 +135,29 @@ export interface YearRow {
   fromBrokerage: number
   fromDeferred: number
   fromRoth: number
+  /**
+   * Moved from the 401(k) and IRA into the Roth this year. Not a withdrawal:
+   * the money stays in the plan and the balance does not fall by it. What it
+   * costs is the ordinary income tax due on it now, which the withdrawal above
+   * has been grossed up to cover.
+   */
+  conversion: number
   /** End-of-year balance of each pot, in today's dollars like every other. */
   brokerageBalance: number
   deferredBalance: number
   rothBalance: number
+  /**
+   * The distribution the law required from the 401(k) and IRA this year, and
+   * how much of the withdrawal was left over once the year had been paid for.
+   *
+   * A required distribution is not sized to what a household needs, so a plan
+   * with a large deferred balance and modest spending is pushed into taking —
+   * and being taxed on — more than it meant to. `surplus` is what happens to
+   * the excess: it has been taxed, so it moves to the brokerage account
+   * rather than staying sheltered or disappearing.
+   */
+  requiredDistribution: number
+  surplus: number
   /** Tax paid on this year's withdrawal. */
   taxes: number
   /**
@@ -111,6 +171,30 @@ export interface YearRow {
   federalTax: number
   /** The capital-gains half of federalTax, and the gain it was charged on. */
   federalGainsTax: number
+  /**
+   * The 10% additional tax on a deferred withdrawal taken before 59½. Part of
+   * federalTax, like federalGainsTax, rather than a charge beside it.
+   */
+  earlyWithdrawalPenalty: number
+  /**
+   * The Medicare surcharge this year, on income from two years earlier.
+   *
+   * Only the amount above the standard premium — the standard premium is an
+   * ordinary cost of being 65 and belongs in spending, where the expense
+   * estimator already offers it as a line. This is the part that is charged
+   * for having had income, and the part a conversion buys.
+   *
+   * Not a tax: it is a premium, so it is spent rather than withheld, and it
+   * sits outside `taxes` and outside `federalTax`. It raises the withdrawal
+   * because the year has to fund it.
+   */
+  irmaaSurcharge: number
+  /**
+   * Modified adjusted gross income this year, as Medicare measures it. Carried
+   * because it is what sets the surcharge two years later, and because a
+   * reader looking at a surcharge wants to see the income that caused it.
+   */
+  magi: number
   capitalGains: number
   stateTax: number
   taxableSocialSecurity: number
@@ -137,6 +221,8 @@ export interface PlanResult {
   totalSocialSecurity: number
   /** total tax paid on withdrawals across retirement, nominal */
   totalTaxes: number
+  /** total Medicare surcharges across retirement, today's dollars */
+  totalIrmaa: number
 }
 
 export const DEFAULT_INPUTS: PlanInputs = {
@@ -358,10 +444,33 @@ export function simulate(inputs: PlanInputs): PlanResult {
     stateTaxRate,
     taxState,
     filingStatus,
+    // Absent on every stored plan, and on every plan the form produces. Only
+    // the candidates `compareConversions` builds ever set them.
+    conversionAnnual = 0,
+    conversionFromAge = 0,
+    conversionToAge = 0,
   } = inputs
 
   const rows: YearRow[] = []
   const thisYear = new Date().getFullYear()
+  // Set by birth year, so it is a property of the plan rather than of the age
+  // reached in any given row.
+  const rmdStart = rmdAge(currentAge, thisYear)
+  /**
+   * Modified adjusted gross income by age, in today's dollars, so a year can
+   * look back two to find the income its Medicare surcharge is charged on.
+   *
+   * Real rather than nominal because the thresholds are indexed to inflation,
+   * exactly as the tax brackets are — comparing a nominal income thirty years
+   * out against today's thresholds would put almost every plan in the top tier
+   * for no reason but the passage of time.
+   *
+   * Working years are recorded as nothing, because the projection does not
+   * model a salary. For someone who retires at 65 that understates the first
+   * two Medicare years, which are charged on the last two years of work.
+   */
+  const magiByAge = new Map<number, number>()
+  let totalIrmaa = 0
   const infl = inflationRate / 100
   const cola = socialSecurityCola / 100
   // Only the gap between the COLA and inflation moves the benefit in real
@@ -428,6 +537,13 @@ export function simulate(inputs: PlanInputs): PlanResult {
     let fromBrokerage = 0
     let fromDeferred = 0
     let fromRoth = 0
+    let unfunded = 0
+    let conversion = 0
+    let irmaaSurcharge = 0
+    let magi = 0
+    let required = 0
+    let surplus = 0
+    let earlyPenalty = 0
     let rate: number
     const annualSpendingReal = monthlySpendingAt(inputs, age) * 12
 
@@ -488,7 +604,57 @@ export function simulate(inputs: PlanInputs): PlanResult {
         otherIncome += otherIncomeMonthly * 12 * inflator
       }
 
-      const shortfall = Math.max(0, annualSpending - socialSecurity - otherIncome)
+      // The surcharge is set by income two years ago, so it is known before
+      // this year's withdrawal is solved and adds no circularity: it is simply
+      // one more thing the year has to pay for.
+      if (age >= MEDICARE_AGE) {
+        const lookback = magiByAge.get(age - LOOKBACK_YEARS) ?? 0
+        // The table that governs this calendar year, and the income restated
+        // in that table's own dollars. Thresholds are indexed to inflation, so
+        // a real income tested against a future year's nominal thresholds
+        // would look smaller every year for no reason but the passage of time.
+        // Beyond the last table entered, the last one is used and its
+        // thresholds hold constant in real terms.
+        const rowYear = thisYear + yearsFromNow
+        const table = irmaaTableFor(rowYear)
+        // Two conversions, and they are not the same one. The income has to
+        // reach the table in the table's own dollars; the surcharge comes back
+        // in those same dollars and has to reach this row in the row's. They
+        // cancel only when the table is the row's own year — which is why
+        // multiplying by `inflator` here, as this once did, charged the
+        // surcharge inflation twice over on every future year.
+        const toTableDollars = Math.pow(1 + infl, table.year - thisYear)
+        const fromTableDollars = Math.pow(1 + infl, rowYear - table.year)
+        irmaaSurcharge =
+          annualSurcharge(lookback * toTableDollars, filingStatus, table.year) *
+          fromTableDollars
+      }
+
+      const shortfall = Math.max(
+        0,
+        annualSpending + irmaaSurcharge - socialSecurity - otherIncome,
+      )
+
+      // Both rules apply whichever way the tax is worked out, so they are
+      // decided once, before the branch. The distribution is taken against the
+      // balance carried into the year, which is the previous year's closing
+      // balance — the figure the rule is written against.
+      const rmdThisYear = requiredDistribution(deferred, age, rmdStart)
+      const penalised = age < PENALTY_FREE_AGE
+
+      // A conversion cannot be made out of a required distribution — the
+      // distribution has to be taken and taxed first, and only what is left
+      // may be moved. So the year's schedule is capped at the balance beyond
+      // the RMD, and the withdrawal solve below is handed a deferred pot with
+      // the converted money already set aside.
+      const scheduled =
+        conversionAnnual > 0 &&
+        age >= conversionFromAge &&
+        age <= conversionToAge
+          ? conversionAnnual * inflator
+          : 0
+      conversion = Math.min(scheduled, Math.max(0, deferred - rmdThisYear))
+
       if (usesDerivedRates(taxState)) {
         // Taxable first, then tax-deferred, then Roth, with the tax on each
         // worked out from what it actually is: a gain at gains rates, a
@@ -502,13 +668,19 @@ export function simulate(inputs: PlanInputs): PlanResult {
           {
             brokerage: brokerage / inflator,
             gainShare: brokerageGainShare,
-            deferred: deferred / inflator,
+            deferred: (deferred - conversion) / inflator,
             roth: roth / inflator,
+          },
+          {
+            requiredDeferred: rmdThisYear / inflator,
+            earlyPenalty: penalised,
+            conversion: conversion / inflator,
           },
         )
         withdrawals = draw.gross * inflator
         federalTax = draw.federalTax * inflator
         federalGainsTax = draw.federalGainsTax * inflator
+        earlyPenalty = draw.earlyWithdrawalPenalty * inflator
         capitalGains = draw.capitalGains * inflator
         stateTax = draw.stateTax * inflator
         taxableSocialSecurity = draw.taxableSocialSecurity * inflator
@@ -516,30 +688,113 @@ export function simulate(inputs: PlanInputs): PlanResult {
         fromBrokerage = draw.fromBrokerage * inflator
         fromDeferred = draw.fromDeferred * inflator
         fromRoth = draw.fromRoth * inflator
+        unfunded = draw.unfunded * inflator
+        required = draw.requiredDistribution * inflator
+        surplus = draw.surplus * inflator
       } else {
         // A rate set by hand is a levy on withdrawals, so it says nothing
         // about which pot they came from. Drawn in the same order all the
         // same, so the balances still move the way they would.
-        withdrawals = shortfall / (1 - flatRate)
-        taxes = Math.max(0, withdrawals - shortfall)
+        //
+        // Capped at what the pots hold, for the same reason the derived
+        // branch is: the grossed-up figure is what the year needed, not what
+        // it could take.
+        const convertible = deferred - conversion
+        const available = brokerage + convertible + roth
+        const forced = Math.min(rmdThisYear, convertible)
+        // The conversion is income at the stated rate, and it funds nothing —
+        // so its tax is an extra cost the withdrawal has to carry.
+        const conversionTax = conversion * flatRate
+
+        // The compulsory distribution first, then the conventional order out
+        // of whatever is left of the withdrawal.
+        const split = (gross: number) => {
+          const rest = Math.max(0, gross - forced)
+          const fromB = Math.min(rest, brokerage)
+          const extra = Math.min(rest - fromB, convertible - forced)
+          return {
+            fromB,
+            fromD: forced + extra,
+            fromR: Math.min(rest - fromB - extra, roth),
+          }
+        }
+
+        // Solved rather than grossed up in one step. The rate itself is flat,
+        // but the penalty is charged on the deferred part of the draw and the
+        // deferred part depends on how large the draw had to be to carry it.
+        let gross = Math.min(
+          Math.max((shortfall + conversionTax) / (1 - flatRate), forced),
+          available,
+        )
+        for (let i = 0; i < 12; i++) {
+          const penalty = penalised
+            ? split(gross).fromD * EARLY_WITHDRAWAL_PENALTY_RATE
+            : 0
+          const next = Math.min(
+            Math.max((shortfall + conversionTax + penalty) / (1 - flatRate), forced),
+            available,
+          )
+          if (Math.abs(next - gross) < 0.5) break
+          gross = next
+        }
+
+        withdrawals = gross
+        const parts = split(withdrawals)
+        fromBrokerage = parts.fromB
+        fromDeferred = parts.fromD
+        fromRoth = parts.fromR
+        required = forced
+        earlyPenalty = penalised ? fromDeferred * EARLY_WITHDRAWAL_PENALTY_RATE : 0
+        // Charged on the withdrawal rather than inferred from the difference,
+        // so it stays right once the cap has bitten.
+        const levy = withdrawals * flatRate + conversionTax
+        taxes = levy + earlyPenalty
+        // Decided on whether the pots capped the draw, as in the derived
+        // branch: the loop above settles to within fifty cents, and comparing
+        // the two figures directly would read that residue as a failed year.
+        unfunded =
+          withdrawals >= available - 1e-9
+            ? Math.max(0, shortfall - (withdrawals - taxes))
+            : 0
+        surplus = Math.max(0, withdrawals - taxes - shortfall)
         // A hand-entered rate is one levy split two ways, so the only honest
-        // division is the ratio the two rates were given in.
+        // division is the ratio the two rates were given in. The penalty is
+        // not part of that split — it is federal, whatever the rates say.
         const rateSum = federalTaxRate + stateTaxRate
-        federalTax = rateSum > 0 ? (taxes * federalTaxRate) / rateSum : taxes
-        stateTax = taxes - federalTax
-        fromBrokerage = Math.min(withdrawals, brokerage)
-        fromDeferred = Math.min(withdrawals - fromBrokerage, deferred)
-        fromRoth = Math.min(withdrawals - fromBrokerage - fromDeferred, roth)
+        const federalLevy = rateSum > 0 ? (levy * federalTaxRate) / rateSum : levy
+        federalTax = federalLevy + earlyPenalty
+        stateTax = levy - federalLevy
       }
     }
+
+    // What this year counted as income, in today's dollars, for the surcharge
+    // two years from now to be charged on.
+    magi = magiOf({
+      fromDeferred: fromDeferred / inflator,
+      conversion: conversion / inflator,
+      otherIncome: otherIncome / inflator,
+      taxableSocialSecurity: taxableSocialSecurity / inflator,
+      capitalGains: capitalGains / inflator,
+    })
+    magiByAge.set(age, magi)
 
     // Contributions go to the tax-deferred pot: for most people that is the
     // payroll 401(k), and it is the pot the money is going into if they have
     // not said otherwise.
+    //
+    // A required distribution larger than the year needed leaves cash in hand.
+    // It has already been taxed and it may not go back into the account it was
+    // forced out of, so it lands in the brokerage — which is also why a plan
+    // with big distributions slowly converts a deferred balance into a taxable
+    // one, and why the gains rate starts to matter late in such a plan.
     const flows = {
-      brokerage: -fromBrokerage,
-      deferred: contributions - fromDeferred,
-      roth: -fromRoth,
+      brokerage: surplus - fromBrokerage,
+      // A conversion leaves the deferred pot and arrives in the Roth. It nets
+      // to nothing across the plan, which is why it does not appear in
+      // `withdrawals` and does not move the total balance — only the tax it
+      // triggers does, and that has already been drawn above.
+      deferred: contributions - fromDeferred - conversion,
+      roth: -fromRoth + conversion,
     }
     // Mid-year convention, per pot: half of each pot's own flow grows with it.
     const grow = (bal: number, flow: number) => {
@@ -551,17 +806,31 @@ export function simulate(inputs: PlanInputs): PlanResult {
       grow(deferred, flows.deferred) +
       grow(roth, flows.roth) -
       (brokerage + deferred + roth) -
-      (contributions - withdrawals)
+      // The net flow across all three pots. The surplus left the deferred pot
+      // inside `withdrawals` and came back into the brokerage, so it nets out
+      // of the money that actually left the plan.
+      (contributions - withdrawals + surplus)
     brokerage = grow(brokerage, flows.brokerage)
     deferred = grow(deferred, flows.deferred)
     roth = grow(roth, flows.roth)
 
     let endBalance = brokerage + deferred + roth
 
-    if (endBalance <= 0) {
-      endBalance = 0
-      if (depletionAge === null && !isAccumulation) depletionAge = age
-    }
+    if (endBalance <= 0) endBalance = 0
+
+    /**
+     * Depletion is called from the shortfall, not from the balance.
+     *
+     * The balance never quite gets there. `grow` credits return on half of
+     * each year's outflow, so a pot drawn to nothing is handed a little of it
+     * back, and the balance approaches zero across the remaining years
+     * without ever crossing it. A test on `endBalance <= 0` therefore never
+     * fires, and a plan whose money ran out at 72 reports that it lasted.
+     *
+     * A year that could not fund its spending is the failure, whatever is
+     * left in the account afterwards. That is what `unfunded` records.
+     */
+    if (unfunded > 0 && depletionAge === null && !isAccumulation) depletionAge = age
 
     // Deflators back to today's dollars: flows happen during the year, the
     // balance is measured at its end.
@@ -584,15 +853,22 @@ export function simulate(inputs: PlanInputs): PlanResult {
       socialSecurity: socialSecurity * flowDeflator,
       otherIncome: otherIncome * flowDeflator,
       withdrawals: withdrawals * flowDeflator,
+      unfunded: unfunded * flowDeflator,
       fromBrokerage: fromBrokerage * flowDeflator,
       fromDeferred: fromDeferred * flowDeflator,
       fromRoth: fromRoth * flowDeflator,
+      conversion: conversion * flowDeflator,
       brokerageBalance: brokerage * balanceDeflator,
       deferredBalance: deferred * balanceDeflator,
       rothBalance: roth * balanceDeflator,
       taxes: taxes * flowDeflator,
+      requiredDistribution: required * flowDeflator,
+      surplus: surplus * flowDeflator,
       federalTax: federalTax * flowDeflator,
       federalGainsTax: federalGainsTax * flowDeflator,
+      earlyWithdrawalPenalty: earlyPenalty * flowDeflator,
+      irmaaSurcharge: irmaaSurcharge * flowDeflator,
+      magi,
       capitalGains: capitalGains * flowDeflator,
       stateTax: stateTax * flowDeflator,
       taxableSocialSecurity: taxableSocialSecurity * flowDeflator,
@@ -603,6 +879,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
     totalContributions += contributions * flowDeflator
     totalSocialSecurity += socialSecurity * flowDeflator
     totalTaxes += taxes * flowDeflator
+    totalIrmaa += irmaaSurcharge * flowDeflator
     if (age === safeRetirementAge) firstYearRetirementSpending = annualSpendingReal
     if (socialSecurity > 0 && firstYearSocialSecurity === 0)
       firstYearSocialSecurity = socialSecurity * flowDeflator
@@ -624,6 +901,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
     firstYearSocialSecurity,
     totalSocialSecurity,
     totalTaxes,
+    totalIrmaa,
   }
 }
 

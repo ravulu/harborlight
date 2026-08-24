@@ -38,6 +38,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildInsights } from '@/lib/insights'
+import { compareConversions, type ConversionComparison } from '@/lib/conversions'
 import { Save, Check, CopyPlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -105,6 +106,31 @@ export function RetirementPlanner({
   const [pending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
 
+  /**
+   * Follow the URL when a different saved plan is opened.
+   *
+   * The three states above are seeded once, when the component mounts.
+   * Navigating from one saved plan to another does not mount it again —
+   * it is the same component in the same place, so React keeps its state and
+   * the new props arrive with nowhere to go. The form went on showing the plan
+   * that was open before, and only a full browser reload put that right.
+   *
+   * Resetting during render rather than in an effect is React's own answer to
+   * this, and it is the one that avoids a frame of the wrong plan's figures.
+   * Keyed on `planId` rather than on the inputs themselves so that saving,
+   * refreshing or editing the plan already open leaves the form alone — the
+   * only thing that should discard what is on screen is being sent to a
+   * different plan.
+   */
+  const [shownPlan, setShownPlan] = useState(planId)
+  if (planId !== shownPlan) {
+    setShownPlan(planId)
+    setDraft(initialInputs ? toDraft(initialInputs) : (initialDraft?.draft ?? EMPTY_DRAFT))
+    setName(initialName ?? initialDraft?.name ?? 'My retirement plan')
+    setPersonName(initialPersonName ?? initialDraft?.personName ?? '')
+    setSaved(false)
+  }
+
   // Keep the cookie in step with what they have typed. Signed-out users get
   // no persistence at all, and an open saved plan is not a draft.
   useEffect(() => {
@@ -124,6 +150,13 @@ export function RetirementPlanner({
   const inputs = useMemo(() => toPlanInputs(settledDraft), [settledDraft])
   const result = useMemo(() => (inputs ? simulate(inputs) : null), [inputs])
   const monteCarlo = useMemo(() => (inputs ? runMonteCarlo(inputs) : null), [inputs])
+  // Worked out once and handed to both the tax tab and the insight card. It
+  // costs a sweep of projections plus a market run per row shown, and — more
+  // importantly — the two must quote the same figure. They used not to.
+  const conversions = useMemo(
+    () => (inputs ? compareConversions(inputs) : null),
+    [inputs],
+  )
   // Only worth solving when the plan is short; a healthy one pays nothing.
   const suggestions = useMemo(
     () =>
@@ -328,7 +361,11 @@ export function RetirementPlanner({
               <IncomeChart result={result} inputs={inputs} />
             </TabsContent>
             <TabsContent value="tax" className="pt-4">
-              <TaxPhases inputs={inputs} rows={result.rows} />
+              <TaxPhases
+                inputs={inputs}
+                rows={result.rows}
+                conversions={conversions}
+              />
             </TabsContent>
             <TabsContent value="table" className="pt-4">
               <YearTable result={result} />
@@ -340,7 +377,12 @@ export function RetirementPlanner({
         </Card>
 
         {inputs && result && monteCarlo && (
-          <Insights inputs={inputs} result={result} monteCarlo={monteCarlo} />
+          <Insights
+            inputs={inputs}
+            result={result}
+            monteCarlo={monteCarlo}
+            conversions={conversions}
+          />
         )}
       </div>
     </div>
@@ -358,14 +400,16 @@ function Insights({
   inputs,
   result,
   monteCarlo,
+  conversions,
 }: {
+  conversions: ConversionComparison | null
   inputs: PlanInputs
   result: ReturnType<typeof simulate>
   monteCarlo: MonteCarloResult
 }) {
   const insights = useMemo(
-    () => buildInsights(inputs, result, monteCarlo),
-    [inputs, result, monteCarlo],
+    () => buildInsights(inputs, result, monteCarlo, conversions),
+    [inputs, result, monteCarlo, conversions],
   )
   if (insights.length === 0) return null
 
@@ -474,6 +518,12 @@ function EmptyProjection({ missing }: { missing: readonly MoneyField[] }) {
 function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
   // A column of dashes for everyone without a pension is worse than no column.
   const hasOther = result.rows.some((r) => r.otherIncome > 0)
+  // Neither of these applies to most plans, and both are the whole story on
+  // the plans they do apply to.
+  const hasRmd = result.rows.some((r) => r.requiredDistribution > 0)
+  const hasSurplus = result.rows.some((r) => r.surplus > 0)
+  const hasShortfall = result.rows.some((r) => r.unfunded > 0)
+  const hasIrmaa = result.rows.some((r) => r.irmaaSurcharge > 0)
 
   return (
     <div className="flex flex-col gap-3">
@@ -484,6 +534,44 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
         same spending after inflation, which is what will actually leave the
         account — and what the withdrawal beside it is really sized to cover.
       </p>
+
+      {hasRmd && (
+        <p className="text-xs text-muted-foreground text-pretty">
+          <span className="font-medium text-foreground">RMD</span> is the
+          required minimum distribution: the least the law makes you take out
+          of the 401(k) and IRA that year. Where it is larger than the
+          withdrawal the plan would otherwise have made, it is the withdrawal.
+          {hasSurplus && (
+            <>
+              {' '}
+              <span className="font-medium text-foreground">Surplus</span> is
+              the part of it your spending did not call for — already taxed, so
+              it moves to the brokerage account rather than staying where it
+              was, and its growth is taxable from then on.
+            </>
+          )}
+        </p>
+      )}
+
+      {hasIrmaa && (
+        <p className="text-xs text-muted-foreground text-pretty">
+          <span className="font-medium text-foreground">Medicare</span> is the
+          extra Medicare charges the year, above the ordinary premium, for
+          having had a higher income two years earlier. It is a premium rather
+          than a tax, so it is not in the Tax column — it is spending the
+          withdrawal beside it had to cover.
+        </p>
+      )}
+
+      {hasShortfall && (
+        <p className="text-xs text-muted-foreground text-pretty">
+          <span className="font-medium text-destructive">Short</span> is the
+          spending the accounts could not cover once they ran dry. The
+          withdrawal beside it stops at what was actually there, so these years
+          are ones the plan does not pay for rather than ones it funds from
+          nothing.
+        </p>
+      )}
 
       <div className="max-h-[360px] overflow-auto rounded-lg border border-border">
         <table className="w-full text-sm">
@@ -514,13 +602,45 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
               {hasOther && (
                 <th className="px-3 py-2 font-medium text-right">Other income</th>
               )}
+              {hasRmd && (
+                <th
+                  className="px-3 py-2 font-medium text-right"
+                  title="Required minimum distribution: what the law forces out of the 401(k) and IRA this year, whether or not the spending needs it"
+                >
+                  RMD
+                </th>
+              )}
               <th
                 className="px-3 py-2 font-medium text-right"
                 title="The withdrawal, and what share of the balance it came out of — the figure the 4% rule measures"
               >
                 Withdrawal (rate)
               </th>
+              {hasSurplus && (
+                <th
+                  className="px-3 py-2 font-medium text-right"
+                  title="The part of the withdrawal the spending did not need — taxed, then moved to the brokerage account"
+                >
+                  Surplus
+                </th>
+              )}
+              {hasShortfall && (
+                <th
+                  className="px-3 py-2 font-medium text-right"
+                  title="Spending the accounts could not cover, after tax on what they could"
+                >
+                  Short
+                </th>
+              )}
               <th className="px-3 py-2 font-medium text-right">Tax</th>
+              {hasIrmaa && (
+                <th
+                  className="px-3 py-2 font-medium text-right"
+                  title="The Medicare surcharge for having had a higher income two years earlier — a premium, not a tax"
+                >
+                  Medicare
+                </th>
+              )}
               <th className="px-3 py-2 font-medium text-right">Growth</th>
               <th className="px-3 py-2 font-medium text-right">Balance</th>
             </tr>
@@ -555,6 +675,11 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
                     {r.otherIncome ? fmt(r.otherIncome) : '—'}
                   </td>
                 )}
+                {hasRmd && (
+                  <td className="px-3 py-1.5 text-right text-muted-foreground">
+                    {r.requiredDistribution ? fmt(r.requiredDistribution) : '—'}
+                  </td>
+                )}
                 <td className="px-3 py-1.5 text-right text-muted-foreground">
                   {r.withdrawals ? (
                     <>
@@ -574,9 +699,24 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
                     '—'
                   )}
                 </td>
+                {hasSurplus && (
+                  <td className="px-3 py-1.5 text-right text-muted-foreground">
+                    {r.surplus ? fmt(r.surplus) : '—'}
+                  </td>
+                )}
+                {hasShortfall && (
+                  <td className="px-3 py-1.5 text-right text-destructive">
+                    {r.unfunded ? fmt(r.unfunded) : '—'}
+                  </td>
+                )}
                 <td className="px-3 py-1.5 text-right text-muted-foreground">
                   {r.taxes ? fmt(r.taxes) : '—'}
                 </td>
+                {hasIrmaa && (
+                  <td className="px-3 py-1.5 text-right text-muted-foreground">
+                    {r.irmaaSurcharge >= 1 ? fmt(r.irmaaSurcharge) : '—'}
+                  </td>
+                )}
                 <td className="px-3 py-1.5 text-right text-muted-foreground">
                   {fmt(r.growth)}
                 </td>
