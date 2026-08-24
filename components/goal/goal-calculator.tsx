@@ -142,33 +142,80 @@ function Field({
   )
 }
 
+/** A count with its noun agreeing. */
+const plural = (n: number, one: string, many: string) =>
+  `${n} ${n === 1 ? one : many}`
+
 const LEVERS: Record<
   Lever['kind'],
-  { title: string; icon: React.ReactNode; unit: (v: number) => string; note: string }
+  {
+    title: string
+    icon: React.ReactNode
+    unit: (v: number) => string
+    /**
+     * What the answer costs against where the plan already is.
+     *
+     * The headline figure alone makes a reader do the subtraction — `$4,170 a
+     * month` beside `$600 a month now` is two numbers and a sum. The
+     * difference is the part they actually weigh, so it is the part that gets
+     * said.
+     *
+     * `lump` is the exception: it is solved as the amount to add, so it is
+     * already a difference and only needs saying what it is added to.
+     */
+    delta: (needed: number, current: number) => string
+    note: string
+  }
 > = {
   save: {
     title: 'Save more each month',
     icon: <PiggyBank className="size-4" />,
     unit: (v) => `${money(v)} a month`,
+    delta: (needed, current) => {
+      const d = needed - current
+      if (Math.abs(d) < 1) return `the same as you save now`
+      return d > 0
+        ? `${money(d)} a month more than now`
+        : `${money(-d)} a month less than now`
+    },
     note: 'The lever most within your control, and the one that costs you something every month between now and then.',
   },
   wait: {
     title: 'Give it more years',
     icon: <CalendarClock className="size-4" />,
     unit: (v) => `retire at ${Math.round(v)}`,
+    delta: (needed, current) => {
+      const d = Math.round(needed) - Math.round(current)
+      if (d === 0) return `the age you already chose`
+      return d > 0
+        ? `${plural(d, 'year', 'years')} later than ${Math.round(current)}`
+        : `${plural(-d, 'year', 'years')} sooner than ${Math.round(current)}`
+    },
     note: 'The most powerful lever and the only one you cannot buy back later. Every year you wait is a year of growth on everything already saved.',
   },
   lump: {
     title: 'Start with more',
     icon: <Coins className="size-4" />,
     unit: (v) => `${money(v)} today`,
+    // Solved as the amount to add, so the figure is the difference already.
+    delta: (_needed, current) =>
+      current > 0
+        ? `on top of the ${money(current)} you have`
+        : `paid in before the saving starts`,
     note: 'A windfall, a sale, an old account you had forgotten. Money that arrives today has the whole run to compound.',
   },
   risk: {
     title: 'Take more risk',
     icon: <TrendingUp className="size-4" />,
     unit: (v) => `${v}% a year`,
-    note: 'The lever that looks free and is not. A higher expected return comes with a wider spread of outcomes, so it lifts the lucky futures more than the unlucky ones.',
+    delta: (needed, current) => {
+      const d = Math.round((needed - current) * 10) / 10
+      if (Math.abs(d) < 0.05) return `the rate you already set`
+      return d > 0
+        ? `${d} points above the ${current}% you set`
+        : `${-d} points below the ${current}% you set`
+    },
+    note: 'The one that looks free and is not. A higher return has to be bought with a portfolio that can fall further, and this page treats it as steady — so it flatters this lever against the other three.',
   },
 }
 
@@ -204,6 +251,9 @@ function LeverCard({
 }) {
   const meta = LEVERS[lever.kind]
   const unreachable = lever.needed === null
+  // A lever with nothing to do says so. "$0 a month" is arithmetically right
+  // and reads as an instruction to save nothing.
+  const settledAlready = lever.needed === 0
 
   return (
     <Card className={cn('p-5 gap-3', unreachable && 'border-dashed')}>
@@ -232,12 +282,12 @@ function LeverCard({
       ) : (
         <>
           <p className="text-2xl font-semibold tabular-nums text-foreground text-balance">
-            {meta.unit(lever.needed!)}
+            {settledAlready ? 'Nothing more' : meta.unit(lever.needed!)}
           </p>
-          <p className="text-xs text-muted-foreground">
-            {lever.kind === 'wait' || lever.kind === 'risk'
-              ? `instead of ${meta.unit(lever.current)}`
-              : `you have ${meta.unit(lever.current)} now`}
+          <p className="text-xs font-medium text-primary">
+            {settledAlready
+              ? 'this lever is already doing enough'
+              : meta.delta(lever.needed!, lever.current)}
           </p>
         </>
       )}
@@ -428,11 +478,13 @@ export function GoalCalculator() {
               ? 'Fill in the boxes above and the four routes will appear here.'
               : `Still needed: ${missing.join(', ')}.`}
           </p>
-          <p className="text-sm text-muted-foreground text-pretty">
-            {missing.length === 0
-              ? 'Set a retirement age later than your age now.'
-              : 'Saved so far and Saving now can be left blank — blank means none, which is a real answer and a common one.'}
-          </p>
+          {/* Only when everything is filled in and the answer is still not
+              computable, which leaves exactly one thing it can be. */}
+          {missing.length === 0 && (
+            <p className="text-sm text-muted-foreground text-pretty">
+              Set a retirement age later than your age now.
+            </p>
+          )}
         </Card>
       ) : (
         // Dimmed while the figures are still moving, so a stale answer reads
@@ -507,9 +559,13 @@ export function GoalCalculator() {
                 {money(goal.growth)}
               </span>
               .{' '}
+              {/* Both true, both about time. The first is the good news and
+                  gets to sound like it; the second is the same fact seen from
+                  a shorter runway, and points at the fix rather than the
+                  shortfall. */}
               {goal.growth > goal.contributed
-                ? 'More than half of what you end up with was never yours to save — which is why the years lever beats the others.'
-                : 'Over a shorter run growth has less time to work, so more of the total has to come out of your own pocket. The same plan started ten years earlier would flip this bar.'}
+                ? 'Compounding is doing more of the work than you are — every year it stays invested, your money earns on the growth it already made, and that snowball is the whole reason starting is worth more than saving harder later.'
+                : 'Give it longer and compounding takes over: the growth you have already earned starts earning too. The same plan run a few more years would tip this bar the other way, with the market contributing more than you do.'}
             </p>
           </Card>
 

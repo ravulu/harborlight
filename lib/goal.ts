@@ -13,8 +13,16 @@ import { DEFAULT_INPUTS, simulate } from '@/lib/retirement'
  * disagree about the same figures.
  */
 
-/** Bisection steps. Eight halvings resolve a $20,000 range to under $80. */
-const STEPS = 9
+/**
+ * Bisection steps.
+ *
+ * Twenty halvings resolve even the widest range here — a lump sum searched up
+ * to $2,000,000 — to under two dollars. Nine was too few: it bottomed out at
+ * $3,906, so a plan that already met its target was still told to find four
+ * thousand pounds from somewhere. Steps are cheap now that no market
+ * simulation runs behind them.
+ */
+const STEPS = 20
 
 export type LeverKind = 'save' | 'wait' | 'lump' | 'risk'
 
@@ -106,6 +114,10 @@ function solve(
   round: (value: number) => number,
 ): number | null {
   if (reach(apply(max)) < target) return null
+  // Nothing needed at all. Worth its own answer rather than whatever the
+  // halving happens to bottom out at, which is what a plan already past its
+  // target used to be told to do.
+  if (reach(apply(0)) >= target) return 0
 
   let low = 0
   let high = max
