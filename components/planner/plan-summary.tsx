@@ -212,6 +212,28 @@ function Fixes({
  * out the same in all 10,000 runs and quoting a range for them would invent
  * uncertainty that is not there.
  */
+/**
+ * Why a simulated tile and the year-by-year table disagree.
+ *
+ * The app answers "what is this plan worth" on two bases — a single steady run
+ * in the Table tab and in the ladders under Tax, and the middle of ten thousand
+ * volatile ones in these tiles — and used to say so nowhere. A reader comparing
+ * the two finds a discrepancy with no wrong number in it, which is the worst
+ * kind to go looking for. The gap is not even consistent in direction: drag
+ * pulls the median below a smooth path at retirement, while a random path's
+ * highest point tends to overshoot a smooth one's.
+ */
+function BasisNote() {
+  return (
+    <p>
+      Because this is simulated, it will not match the Table tab or the ladders
+      under Tax — those are a single steady run at the return you entered, with
+      no market variation. Two different questions, and neither answer is the
+      other&apos;s error.
+    </p>
+  )
+}
+
 function Spread({ outcomes }: { outcomes: Outcomes }) {
   const cell = (label: string, value: number, align: string, strong?: boolean) => (
     <div className={cn('flex flex-col gap-0.5', align)}>
@@ -555,6 +577,7 @@ export function PlanSummary({
                 means half the runs did better than this and half did worse. The
                 range underneath is where the middle four-fifths of them landed.
               </p>
+              <BasisNote />
             </>
           }
         />
@@ -617,6 +640,13 @@ export function PlanSummary({
                 If this is much larger than the balance at retirement, the plan
                 is still growing after you stop working.
               </p>
+              <p>
+                Like the tile beside it, this is the middle of{' '}
+                {monteCarlo.runs.toLocaleString()} runs against different market
+                outcomes — the highest point each run reached, with half of them
+                peaking above this and half below.
+              </p>
+              <BasisNote />
             </>
           }
         />

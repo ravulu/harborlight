@@ -136,7 +136,8 @@ export function openWindows(inputs: PlanInputs, result: PlanResult): OpenWindow[
         `past it raises the amount by about 8% for each year, and the increases stop dead at ` +
         `${MAX_CLAIM_AGE}. This plan claims at ${claim}, which is ${benefitFactorLabel(claim)} of the full ` +
         `benefit. Waiting later than ${MAX_CLAIM_AGE} adds nothing at all, which is the part worth ` +
-        `knowing: it is a range with a ceiling, not a case of later always being better.`,
+        `knowing: it is a range with a ceiling, not a case of later always being better. What each ` +
+        `starting age does to this plan is priced in the Tax tab, under Suggested actions.`,
       oneWay:
         `There is one way back. Within twelve months of starting you can withdraw the application and ` +
         `repay what you have been paid — once in a lifetime. After that the rate you started at is the ` +

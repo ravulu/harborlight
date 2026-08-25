@@ -1,5 +1,7 @@
 'use client'
 
+import { useMemo } from 'react'
+
 import type { PlanInputs, YearRow } from '@/lib/retirement'
 import { formatCurrency } from '@/lib/retirement'
 import {
@@ -15,6 +17,8 @@ import {
 import { findState, FILING_STATUSES, type FilingStatus } from '@/lib/state-tax'
 import type { ConversionComparison } from '@/lib/conversions'
 import { InsightsLink } from '@/components/planner/insights-link'
+import { ClaimingLadder } from '@/components/planner/claiming-ladder'
+import { compareClaiming } from '@/lib/claiming'
 import { CLIFF, MEDICARE_AGE, povertyLine } from '@/lib/aca'
 import { cn } from '@/lib/utils'
 
@@ -247,9 +251,7 @@ export function TaxPhases({
         })}
       </div>
 
-      {conversions && (
-        <SuggestedActions conversions={conversions} inputs={inputs} />
-      )}
+      <SuggestedActions conversions={conversions} inputs={inputs} />
 
       <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-4 text-xs leading-relaxed text-muted-foreground">
         <p className="font-medium text-foreground">How these were worked out</p>
@@ -573,9 +575,38 @@ function SuggestedActions({
   conversions,
   inputs,
 }: {
-  conversions: ConversionComparison
+  conversions: ConversionComparison | null
   inputs: PlanInputs
 }) {
+  // Cheap enough to sit here rather than be threaded down from the planner:
+  // a handful of deterministic runs, no market simulation behind any of them.
+  const claiming = useMemo(() => compareClaiming(inputs), [inputs])
+
+  /**
+   * The actions this plan actually has, as one list.
+   *
+   * One list rather than two. The heading below is only worth rendering if
+   * something follows it, and the obvious way to arrange that — a guard that
+   * names every action, and then a body that names them all again — is two
+   * lists that have to be kept in agreement by hand. They will not stay in
+   * agreement: adding a third action and forgetting the guard hides a section
+   * that has content, and removing one and forgetting the guard leaves a
+   * heading with nothing under it.
+   *
+   * Deriving the guard from the list makes both impossible. Adding or removing
+   * an action is one line, and emptiness takes care of itself.
+   */
+  const actions = [
+    conversions ? (
+      <RothConversions key="roth" c={conversions} inputs={inputs} />
+    ) : null,
+    claiming ? (
+      <ClaimingLadder key="claiming" c={claiming} inputs={inputs} />
+    ) : null,
+  ].filter(Boolean)
+
+  if (actions.length === 0) return null
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
@@ -588,7 +619,7 @@ function SuggestedActions({
           make, priced against the choice of doing nothing.
         </p>
       </div>
-      <RothConversions c={conversions} inputs={inputs} />
+      {actions}
     </div>
   )
 }

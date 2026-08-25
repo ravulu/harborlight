@@ -527,8 +527,8 @@ function SpouseBenefit({
           <span className="font-medium text-foreground">
             {money((workerFull * benefitFactor(inputs.socialSecurityAge) + paid) * 12)}
           </span>{' '}
-          a year. If one of you dies the survivor keeps only the larger benefit,
-          so it would fall to{' '}
+          a year. Whichever of you lives longer keeps only the larger benefit, so
+          it would fall to{' '}
           {money(
             Math.max(workerFull * benefitFactor(inputs.socialSecurityAge), paid) * 12,
           )}{' '}
