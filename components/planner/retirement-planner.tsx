@@ -40,8 +40,10 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildInsights } from '@/lib/insights'
 import { INSIGHTS_ID } from '@/components/planner/insights-link'
-import { MEDICARE_AGE } from '@/lib/aca'
+import { MEDICARE_AGE, NATIONAL_AVERAGE_NOTE } from '@/lib/aca'
 import { WhatsStillOpen } from '@/components/planner/whats-still-open'
+import { SpendingLever } from '@/components/planner/spending-lever'
+import { spendingLeverage } from '@/lib/spending-lever'
 import { compareConversions, type ConversionComparison } from '@/lib/conversions'
 import { record } from '@/lib/usage'
 import { earliestRetirement } from '@/lib/earliest'
@@ -158,6 +160,15 @@ export function RetirementPlanner({
   // Worked out once and handed to both the tax tab and the insight card. It
   // costs a sweep of projections plus a market run per row shown, and — more
   // importantly — the two must quote the same figure. They used not to.
+  /**
+   * Four bisections over a simulated market, so it rides on the settled draft
+   * like everything else expensive here rather than running per keystroke.
+   */
+  const leverage = useMemo(
+    () => (inputs ? spendingLeverage(inputs) : null),
+    [inputs],
+  )
+
   const conversions = useMemo(
     () => (inputs ? compareConversions(inputs) : null),
     [inputs],
@@ -405,6 +416,13 @@ export function RetirementPlanner({
         {/* Below the insights, because a deadline is only interesting once you
             know why the thing it applies to matters. */}
         {inputs && result && <WhatsStillOpen inputs={inputs} result={result} />}
+
+        {/* Last, because it asks for something rather than rearranging what is
+            already there — and nobody wants to be told to spend less before
+            they have been told what they already have. */}
+        {inputs && leverage && (
+          <SpendingLever leverage={leverage} inputs={inputs} />
+        )}
       </div>
     </div>
   )
@@ -597,7 +615,9 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
           that year&apos;s own income — the subsidy is already taken off — and
           from {MEDICARE_AGE} it is what you entered as the cost on top of
           Medicare. Like the column beside it, a premium rather than a tax, and
-          funded by the withdrawal on the same row.
+          funded by the withdrawal on the same row. The pre-{MEDICARE_AGE} part
+          is {NATIONAL_AVERAGE_NOTE} — read the shape of the column, and treat
+          any single figure in it as indicative.
         </p>
       )}
 

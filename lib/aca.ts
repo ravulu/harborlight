@@ -77,11 +77,29 @@ export const APPLICABLE_PERCENTAGE: PercentageTier[] = [
  *
  * A national average stands in for a figure that genuinely varies by rating
  * area, sometimes by a factor of two. It is the right order of magnitude
- * everywhere and the right number almost nowhere, which is why what this
- * module is used for is the *difference* between two choices rather than the
- * absolute cost of either.
+ * everywhere and the right number almost nowhere.
+ *
+ * This module was written for the *difference* between two choices, where that
+ * hardly matters — both sides carry the same error and it cancels. Since the
+ * projection began charging cover as a cost in its own right, the absolute
+ * figure is on screen too, and there it does not cancel. So anywhere the level
+ * is shown rather than a comparison, it has to be labelled as the national
+ * average it is: see `NATIONAL_AVERAGE_NOTE`.
  */
 export const BENCHMARK_40_MONTHLY = 497
+
+/**
+ * The caveat that has to travel with any premium shown as a level.
+ *
+ * Not a generic "estimated" tag. Everything in this app is an estimate, and
+ * labelling one figure that way implies the others are exact — the house habit
+ * is to name what is uncertain and in which direction, the way the projected
+ * tax brackets and the unmodelled state credits already do. Here what is
+ * uncertain is geography, and the direction is either.
+ */
+export const NATIONAL_AVERAGE_NOTE =
+  'priced from the national average benchmark plan, which varies by where you ' +
+  'live — sometimes by half either way'
 
 /**
  * The CMS default age curve: what an insurer may charge at each age relative

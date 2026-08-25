@@ -19,7 +19,7 @@ import type { ConversionComparison } from '@/lib/conversions'
 import { InsightsLink } from '@/components/planner/insights-link'
 import { ClaimingLadder } from '@/components/planner/claiming-ladder'
 import { compareClaiming } from '@/lib/claiming'
-import { CLIFF, MEDICARE_AGE, povertyLine } from '@/lib/aca'
+import { CLIFF, MEDICARE_AGE, NATIONAL_AVERAGE_NOTE, povertyLine } from '@/lib/aca'
 import { cn } from '@/lib/utils'
 
 const money = (v: number) => formatCurrency(Math.round(v))
@@ -241,7 +241,7 @@ export function TaxPhases({
                     {p.totalHealthPremium > 0 && (
                       <Line
                         label="Health cover before 65"
-                        value={money(p.totalHealthPremium)}
+                        value={`about ${money(p.totalHealthPremium)}`}
                       />
                     )}
                   </dl>
@@ -251,6 +251,18 @@ export function TaxPhases({
                     status={inputs.filingStatus}
                   />
                   <p className="text-xs text-muted-foreground text-pretty">{p.detail}</p>
+                  {/* Beside the figure rather than in a footnote, because the
+                      caveat is about the level and the level is right there. */}
+                  {p.totalHealthPremium > 0 && (
+                    <p className="text-xs text-muted-foreground text-pretty">
+                      <span className="font-medium text-foreground">
+                        Health cover
+                      </span>{' '}
+                      is {NATIONAL_AVERAGE_NOTE}. What it does across the rows —
+                      when it steps, and that it stops at {MEDICARE_AGE} — holds
+                      wherever you are; the exact figure is indicative.
+                    </p>
+                  )}
                   <p className="mt-auto rounded-md border border-primary/20 bg-accent/40 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground text-pretty">
                     <span className="font-medium text-foreground">What you can do.</span>{' '}
                     {p.scenario}
