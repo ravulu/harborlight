@@ -13,6 +13,7 @@ import {
   magiOf,
 } from '@/lib/irmaa'
 import { benefitFactor, spouseMonthlyBenefit } from '@/lib/social-security'
+import { acaCost, acaMagiOf } from '@/lib/aca'
 import { usesDerivedRates } from '@/lib/state-tax'
 
 export interface PlanInputs {
@@ -70,6 +71,32 @@ export interface PlanInputs {
   spendingStep1Monthly: number
   spendingStep2Age: number
   spendingStep2Monthly: number // in today's dollars
+  /**
+   * How health cover is paid for between stopping work and Medicare at 65.
+   *
+   * Asked rather than priced, because the cost cannot be guessed from the plan
+   * but the arrangement can simply be stated. "What does marketplace cover cost
+   * you" is a question almost nobody can answer; "will you be on the
+   * marketplace" is one almost everybody can.
+   *
+   * `marketplace` prices each year from that year's own income, subsidy and
+   * all. `own` charges what was entered, for a retiree, COBRA or spouse's
+   * plan. `none` charges nothing, for cover that costs the household nothing.
+   */
+  healthCoverBefore65: 'marketplace' | 'own' | 'none'
+  /** What that own plan costs a month, today's dollars. Only read for `own`. */
+  healthPremiumMonthly: number
+  /**
+   * What health care costs a month from 65, on top of Medicare itself.
+   *
+   * Kept out of the spending figure rather than folded into it, because the
+   * spending figure is one number for the whole of retirement and this cost
+   * does not start until 65. Someone retiring at 55 who put their Medigap and
+   * Part D premiums into their monthly spending was being charged them for ten
+   * years before Medicare began — and charged marketplace cover for the same
+   * years on top.
+   */
+  healthAfter65Monthly: number
   socialSecurityMonthly: number // in today's dollars; 0 if none is expected
   socialSecurityAge: number // age the benefit is claimed
   socialSecurityCola: number // annual cost-of-living adjustment, %
@@ -228,6 +255,16 @@ export interface YearRow {
    */
   irmaaSurcharge: number
   /**
+   * Health cover before Medicare, and what a subsidy took off it.
+   *
+   * Beside the spending rather than inside it, exactly as the Medicare
+   * surcharge is: it is a real cost the year has to fund, and burying it in
+   * the spending figure would make the figure the user typed disagree with
+   * the one the plan charged.
+   */
+  healthPremium: number
+  healthSubsidy: number
+  /**
    * Modified adjusted gross income this year, as Medicare measures it. Carried
    * because it is what sets the surcharge two years later, and because a
    * reader looking at a surcharge wants to see the income that caused it.
@@ -267,7 +304,18 @@ export interface PlanResult {
   totalTaxes: number
   /** total Medicare surcharges across retirement, today's dollars */
   totalIrmaa: number
+  /** What health cover before Medicare costs the household, over the plan. */
+  totalHealthPremium: number
 }
+
+/**
+ * How many times a year is re-solved to settle its health premium.
+ *
+ * Four is far more than a converging year needs — two passes usually agree to
+ * the dollar. It exists for the year that will not converge, at the 400%
+ * cliff, where the answer steps rather than slides.
+ */
+const HEALTH_SOLVE_PASSES = 4
 
 export const DEFAULT_INPUTS: PlanInputs = {
   currentAge: 30,
@@ -300,6 +348,9 @@ export const DEFAULT_INPUTS: PlanInputs = {
   spendingStep1Monthly: 0,
   spendingStep2Age: 85,
   spendingStep2Monthly: 0,
+  healthCoverBefore65: 'marketplace',
+  healthPremiumMonthly: 0,
+  healthAfter65Monthly: 0,
   socialSecurityMonthly: 2000,
   // Full retirement age for anyone born in 1960 or later.
   socialSecurityAge: 67,
@@ -503,6 +554,9 @@ export function simulate(inputs: PlanInputs): PlanResult {
     preRetirementReturn,
     postRetirementReturn,
     inflationRate,
+    healthCoverBefore65,
+    healthPremiumMonthly,
+    healthAfter65Monthly,
     socialSecurityMonthly,
     socialSecurityAge,
     socialSecurityCola,
@@ -548,7 +602,10 @@ export function simulate(inputs: PlanInputs): PlanResult {
    * two Medicare years, which are charged on the last two years of work.
    */
   const magiByAge = new Map<number, number>()
+  /** What the poverty line and the benchmark premium are measured against. */
+  const householdSize = inputs.filingStatus === 'married' ? 2 : 1
   let totalIrmaa = 0
+  let totalHealthPremium = 0
   let totalEmployerMatch = 0
   const infl = inflationRate / 100
   const cola = socialSecurityCola / 100
@@ -639,6 +696,10 @@ export function simulate(inputs: PlanInputs): PlanResult {
     let unfunded = 0
     let conversion = 0
     let irmaaSurcharge = 0
+    let healthPremium = 0
+    let healthSubsidy = 0
+    /** Cover that is known rather than worked out: an own plan, or Medicare-side costs. */
+    let statedHealth = 0
     let magi = 0
     let required = 0
     let surplus = 0
@@ -740,151 +801,235 @@ export function simulate(inputs: PlanInputs): PlanResult {
           fromTableDollars
       }
 
-      const shortfall = Math.max(
+      /**
+       * Marketplace cover applies only between stopping work and Medicare.
+       * While still working, cover comes with the job; from 65 it is Medicare,
+       * whose surcharge is charged above.
+       */
+      const beforeMedicare = age < MEDICARE_AGE
+      const onMarketplace =
+        beforeMedicare && healthCoverBefore65 === 'marketplace'
+      const ownHealthPremium =
+        beforeMedicare && healthCoverBefore65 === 'own'
+          ? healthPremiumMonthly * 12 * inflator
+          : 0
+      /**
+       * From 65 the cost is known rather than worked out, so it is simply
+       * charged: Medicare's own premiums plus whatever sits on top of them.
+       * No settling loop, because nothing here depends on the year's income —
+       * the part that does is the surcharge, and that has its own lookback.
+       */
+      const after65Premium = beforeMedicare
+        ? 0
+        : healthAfter65Monthly * 12 * inflator
+      statedHealth = ownHealthPremium + after65Premium
+
+      /**
+       * What the year has to find, before health cover.
+       *
+       * Cover is the one cost here set by the same year's income — and that
+       * income depends on what the year withdraws to pay for the cover. IRMAA
+       * escapes the same circle with its two-year lookback; this cannot, so
+       * the year is solved more than once and allowed to settle.
+       */
+      const baseShortfall = Math.max(
         0,
-        annualSpending + irmaaSurcharge - socialSecurity - otherIncome,
+        annualSpending +
+          irmaaSurcharge +
+          ownHealthPremium +
+          after65Premium -
+          socialSecurity -
+          otherIncome,
       )
 
-      // Both rules apply whichever way the tax is worked out, so they are
-      // decided once, before the branch. The distribution is taken against the
-      // balance carried into the year, which is the previous year's closing
-      // balance — the figure the rule is written against.
-      const rmdThisYear = requiredDistribution(deferred, age, rmdStart)
-      const penalised = age < PENALTY_FREE_AGE
+      for (let pass = 0; pass < HEALTH_SOLVE_PASSES; pass++) {
+        const shortfall = Math.max(0, baseShortfall + healthPremium)
 
-      // A conversion cannot be made out of a required distribution — the
-      // distribution has to be taken and taxed first, and only what is left
-      // may be moved. So the year's schedule is capped at the balance beyond
-      // the RMD, and the withdrawal solve below is handed a deferred pot with
-      // the converted money already set aside.
-      const scheduled =
-        conversionAnnual > 0 &&
-        age >= conversionFromAge &&
-        age <= conversionToAge
-          ? conversionAnnual * inflator
-          : 0
-      conversion = Math.min(scheduled, Math.max(0, deferred - rmdThisYear))
+        // Both rules apply whichever way the tax is worked out, so they are
+        // decided once, before the branch. The distribution is taken against the
+        // balance carried into the year, which is the previous year's closing
+        // balance — the figure the rule is written against.
+        const rmdThisYear = requiredDistribution(deferred, age, rmdStart)
+        const penalised = age < PENALTY_FREE_AGE
 
-      if (usesDerivedRates(taxState)) {
-        // Taxable first, then tax-deferred, then Roth, with the tax on each
-        // worked out from what it actually is: a gain at gains rates, a
-        // 401(k) dollar as ordinary income, a Roth dollar not at all.
-        const draw = withdrawForNeed(
-          shortfall / inflator,
-          socialSecurity / inflator,
-          otherIncome / inflator,
-          taxState,
-          filingStatus,
-          {
-            brokerage: brokerage / inflator,
-            gainShare: brokerageGainShare,
-            deferred: (deferred - conversion) / inflator,
-            // The HSA is untaxed on the way out exactly as the Roth is, so the
-            // tax engine has no reason to tell them apart. They go in as one
-            // pot and the draw is split below — HSA first, because it is the
-            // one earmarked for the medical costs retirement brings, and the
-            // one whose advantage is lost if it is never spent on them.
-            roth: (roth + hsa) / inflator,
-          },
-          {
-            requiredDeferred: rmdThisYear / inflator,
-            earlyPenalty: penalised,
-            age,
-            conversion: conversion / inflator,
-          },
-        )
-        withdrawals = draw.gross * inflator
-        federalTax = draw.federalTax * inflator
-        federalGainsTax = draw.federalGainsTax * inflator
-        earlyPenalty = draw.earlyWithdrawalPenalty * inflator
-        capitalGains = draw.capitalGains * inflator
-        stateTax = draw.stateTax * inflator
-        taxableSocialSecurity = draw.taxableSocialSecurity * inflator
-        taxes = federalTax + stateTax
-        fromBrokerage = draw.fromBrokerage * inflator
-        fromDeferred = draw.fromDeferred * inflator
-        fromRoth = draw.fromRoth * inflator
-        fromHsa = Math.min(fromRoth, hsa)
-        fromRoth -= fromHsa
-        unfunded = draw.unfunded * inflator
-        required = draw.requiredDistribution * inflator
-        surplus = draw.surplus * inflator
-      } else {
-        // A rate set by hand is a levy on withdrawals, so it says nothing
-        // about which pot they came from. Drawn in the same order all the
-        // same, so the balances still move the way they would.
-        //
-        // Capped at what the pots hold, for the same reason the derived
-        // branch is: the grossed-up figure is what the year needed, not what
-        // it could take.
-        const convertible = deferred - conversion
-        const untaxed = roth + hsa
-        const available = brokerage + convertible + untaxed
-        const forced = Math.min(rmdThisYear, convertible)
-        // The conversion is income at the stated rate, and it funds nothing —
-        // so its tax is an extra cost the withdrawal has to carry.
-        const conversionTax = conversion * flatRate
-
-        // The compulsory distribution first, then the conventional order out
-        // of whatever is left of the withdrawal.
-        const split = (gross: number) => {
-          const rest = Math.max(0, gross - forced)
-          const fromB = Math.min(rest, brokerage)
-          const extra = Math.min(rest - fromB, convertible - forced)
-          return {
-            fromB,
-            fromD: forced + extra,
-            fromR: Math.min(rest - fromB - extra, untaxed),
-          }
-        }
-
-        // Solved rather than grossed up in one step. The rate itself is flat,
-        // but the penalty is charged on the deferred part of the draw and the
-        // deferred part depends on how large the draw had to be to carry it.
-        let gross = Math.min(
-          Math.max((shortfall + conversionTax) / (1 - flatRate), forced),
-          available,
-        )
-        for (let i = 0; i < 12; i++) {
-          const penalty = penalised
-            ? split(gross).fromD * EARLY_WITHDRAWAL_PENALTY_RATE
+        // A conversion cannot be made out of a required distribution — the
+        // distribution has to be taken and taxed first, and only what is left
+        // may be moved. So the year's schedule is capped at the balance beyond
+        // the RMD, and the withdrawal solve below is handed a deferred pot with
+        // the converted money already set aside.
+        const scheduled =
+          conversionAnnual > 0 &&
+          age >= conversionFromAge &&
+          age <= conversionToAge
+            ? conversionAnnual * inflator
             : 0
-          const next = Math.min(
-            Math.max((shortfall + conversionTax + penalty) / (1 - flatRate), forced),
+        conversion = Math.min(scheduled, Math.max(0, deferred - rmdThisYear))
+
+        if (usesDerivedRates(taxState)) {
+          // Taxable first, then tax-deferred, then Roth, with the tax on each
+          // worked out from what it actually is: a gain at gains rates, a
+          // 401(k) dollar as ordinary income, a Roth dollar not at all.
+          const draw = withdrawForNeed(
+            shortfall / inflator,
+            socialSecurity / inflator,
+            otherIncome / inflator,
+            taxState,
+            filingStatus,
+            {
+              brokerage: brokerage / inflator,
+              gainShare: brokerageGainShare,
+              deferred: (deferred - conversion) / inflator,
+              // The HSA is untaxed on the way out exactly as the Roth is, so the
+              // tax engine has no reason to tell them apart. They go in as one
+              // pot and the draw is split below — HSA first, because it is the
+              // one earmarked for the medical costs retirement brings, and the
+              // one whose advantage is lost if it is never spent on them.
+              roth: (roth + hsa) / inflator,
+            },
+            {
+              requiredDeferred: rmdThisYear / inflator,
+              earlyPenalty: penalised,
+              age,
+              conversion: conversion / inflator,
+            },
+          )
+          withdrawals = draw.gross * inflator
+          federalTax = draw.federalTax * inflator
+          federalGainsTax = draw.federalGainsTax * inflator
+          earlyPenalty = draw.earlyWithdrawalPenalty * inflator
+          capitalGains = draw.capitalGains * inflator
+          stateTax = draw.stateTax * inflator
+          taxableSocialSecurity = draw.taxableSocialSecurity * inflator
+          taxes = federalTax + stateTax
+          fromBrokerage = draw.fromBrokerage * inflator
+          fromDeferred = draw.fromDeferred * inflator
+          fromRoth = draw.fromRoth * inflator
+          fromHsa = Math.min(fromRoth, hsa)
+          fromRoth -= fromHsa
+          unfunded = draw.unfunded * inflator
+          required = draw.requiredDistribution * inflator
+          surplus = draw.surplus * inflator
+        } else {
+          // A rate set by hand is a levy on withdrawals, so it says nothing
+          // about which pot they came from. Drawn in the same order all the
+          // same, so the balances still move the way they would.
+          //
+          // Capped at what the pots hold, for the same reason the derived
+          // branch is: the grossed-up figure is what the year needed, not what
+          // it could take.
+          const convertible = deferred - conversion
+          const untaxed = roth + hsa
+          const available = brokerage + convertible + untaxed
+          const forced = Math.min(rmdThisYear, convertible)
+          // The conversion is income at the stated rate, and it funds nothing —
+          // so its tax is an extra cost the withdrawal has to carry.
+          const conversionTax = conversion * flatRate
+
+          // The compulsory distribution first, then the conventional order out
+          // of whatever is left of the withdrawal.
+          const split = (gross: number) => {
+            const rest = Math.max(0, gross - forced)
+            const fromB = Math.min(rest, brokerage)
+            const extra = Math.min(rest - fromB, convertible - forced)
+            return {
+              fromB,
+              fromD: forced + extra,
+              fromR: Math.min(rest - fromB - extra, untaxed),
+            }
+          }
+
+          // Solved rather than grossed up in one step. The rate itself is flat,
+          // but the penalty is charged on the deferred part of the draw and the
+          // deferred part depends on how large the draw had to be to carry it.
+          let gross = Math.min(
+            Math.max((shortfall + conversionTax) / (1 - flatRate), forced),
             available,
           )
-          if (Math.abs(next - gross) < 0.5) break
-          gross = next
+          for (let i = 0; i < 12; i++) {
+            const penalty = penalised
+              ? split(gross).fromD * EARLY_WITHDRAWAL_PENALTY_RATE
+              : 0
+            const next = Math.min(
+              Math.max((shortfall + conversionTax + penalty) / (1 - flatRate), forced),
+              available,
+            )
+            if (Math.abs(next - gross) < 0.5) break
+            gross = next
+          }
+
+          withdrawals = gross
+          const parts = split(withdrawals)
+          fromBrokerage = parts.fromB
+          fromDeferred = parts.fromD
+          fromRoth = parts.fromR
+          fromHsa = Math.min(fromRoth, hsa)
+          fromRoth -= fromHsa
+          required = forced
+          earlyPenalty = penalised ? fromDeferred * EARLY_WITHDRAWAL_PENALTY_RATE : 0
+          // Charged on the withdrawal rather than inferred from the difference,
+          // so it stays right once the cap has bitten.
+          const levy = withdrawals * flatRate + conversionTax
+          taxes = levy + earlyPenalty
+          // Decided on whether the pots capped the draw, as in the derived
+          // branch: the loop above settles to within fifty cents, and comparing
+          // the two figures directly would read that residue as a failed year.
+          unfunded =
+            withdrawals >= available - 1e-9
+              ? Math.max(0, shortfall - (withdrawals - taxes))
+              : 0
+          surplus = Math.max(0, withdrawals - taxes - shortfall)
+          // A hand-entered rate is one levy split two ways, so the only honest
+          // division is the ratio the two rates were given in. The penalty is
+          // not part of that split — it is federal, whatever the rates say.
+          const rateSum = federalTaxRate + stateTaxRate
+          const federalLevy = rateSum > 0 ? (levy * federalTaxRate) / rateSum : levy
+          federalTax = federalLevy + earlyPenalty
+          stateTax = levy - federalLevy
         }
 
-        withdrawals = gross
-        const parts = split(withdrawals)
-        fromBrokerage = parts.fromB
-        fromDeferred = parts.fromD
-        fromRoth = parts.fromR
-        fromHsa = Math.min(fromRoth, hsa)
-        fromRoth -= fromHsa
-        required = forced
-        earlyPenalty = penalised ? fromDeferred * EARLY_WITHDRAWAL_PENALTY_RATE : 0
-        // Charged on the withdrawal rather than inferred from the difference,
-        // so it stays right once the cap has bitten.
-        const levy = withdrawals * flatRate + conversionTax
-        taxes = levy + earlyPenalty
-        // Decided on whether the pots capped the draw, as in the derived
-        // branch: the loop above settles to within fifty cents, and comparing
-        // the two figures directly would read that residue as a failed year.
-        unfunded =
-          withdrawals >= available - 1e-9
-            ? Math.max(0, shortfall - (withdrawals - taxes))
-            : 0
-        surplus = Math.max(0, withdrawals - taxes - shortfall)
-        // A hand-entered rate is one levy split two ways, so the only honest
-        // division is the ratio the two rates were given in. The penalty is
-        // not part of that split — it is federal, whatever the rates say.
-        const rateSum = federalTaxRate + stateTaxRate
-        const federalLevy = rateSum > 0 ? (levy * federalTaxRate) / rateSum : levy
-        federalTax = federalLevy + earlyPenalty
-        stateTax = levy - federalLevy
+        // Cover is priced off this year's own income, so it can only be known
+        // once the year has been solved — and paying for it raises the income
+        // it is priced off. Repeat until the figure stops moving.
+        if (!onMarketplace) break
+        const cost = acaCost(
+          acaMagiOf({
+            fromDeferred: fromDeferred / inflator,
+            conversion: conversion / inflator,
+            otherIncome: otherIncome / inflator,
+            socialSecurity: socialSecurity / inflator,
+            capitalGains: capitalGains / inflator,
+          }),
+          age,
+          householdSize,
+        )
+        const next = cost.net * inflator
+        healthSubsidy = cost.subsidy * inflator
+
+        /**
+         * Stop on the figure the solve above actually funded, never on the one
+         * just computed from it.
+         *
+         * The row has to add up: a year reporting a premium larger than the
+         * withdrawal it raised to pay for it is telling the reader something
+         * untrue about its own arithmetic, and the year-by-year table would
+         * show the difference. Breaking here rather than after the assignment
+         * costs at most the settling tolerance and keeps the row coherent.
+         */
+        if (Math.abs(next - healthPremium) < 0.5) break
+        if (pass === HEALTH_SOLVE_PASSES - 1) break
+
+        /**
+         * Never revised downward.
+         *
+         * The sequence only rises — paying for cover raises income, which
+         * raises what cover costs — so taking the larger is what the iteration
+         * would reach anyway. It also settles the cliff, where the step is not
+         * gradual: a household just under 400% of the poverty line that has to
+         * withdraw for its premium is pushed over by doing so, and genuinely
+         * does lose the whole credit. Rising monotonically means this
+         * terminates rather than oscillating across that edge.
+         */
+        healthPremium = Math.max(healthPremium, next)
       }
     }
 
@@ -996,6 +1141,8 @@ export function simulate(inputs: PlanInputs): PlanResult {
       federalGainsTax: federalGainsTax * flowDeflator,
       earlyWithdrawalPenalty: earlyPenalty * flowDeflator,
       irmaaSurcharge: irmaaSurcharge * flowDeflator,
+      healthPremium: (healthPremium + statedHealth) * flowDeflator,
+      healthSubsidy: healthSubsidy * flowDeflator,
       magi,
       capitalGains: capitalGains * flowDeflator,
       stateTax: stateTax * flowDeflator,
@@ -1009,6 +1156,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
     totalSocialSecurity += socialSecurity * flowDeflator
     totalTaxes += taxes * flowDeflator
     totalIrmaa += irmaaSurcharge * flowDeflator
+    totalHealthPremium += (healthPremium + statedHealth) * flowDeflator
     if (age === safeRetirementAge) firstYearRetirementSpending = annualSpendingReal
     if (socialSecurity > 0 && firstYearSocialSecurity === 0)
       firstYearSocialSecurity = socialSecurity * flowDeflator
@@ -1033,6 +1181,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
     totalSocialSecurity,
     totalTaxes,
     totalIrmaa,
+    totalHealthPremium,
   }
 }
 

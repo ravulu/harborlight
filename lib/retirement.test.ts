@@ -506,10 +506,15 @@ describe('the early-withdrawal penalty', () => {
       // `spending`, which like every flow on the row is in today's dollars —
       // `spendingThatYear` is the same figure inflated to the dollars of the
       // year, and is the one column that is not.
-      expect(row.withdrawals - row.taxes, `age ${row.age}`).toBeCloseTo(
-        row.spending,
-        0,
-      )
+      //
+      // The premium and the surcharge come off alongside the tax. Both are
+      // charged beside the spending rather than inside it, so a withdrawal
+      // that covered only `spending` would leave the year short of them —
+      // which is exactly what this checks it does not do.
+      expect(
+        row.withdrawals - row.taxes - row.healthPremium - row.irmaaSurcharge,
+        `age ${row.age}`,
+      ).toBeCloseTo(row.spending, 0)
     }
   })
 

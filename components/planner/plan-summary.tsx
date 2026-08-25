@@ -216,8 +216,8 @@ function Fixes({
  * Why a simulated tile and the year-by-year table disagree.
  *
  * The app answers "what is this plan worth" on two bases — a single steady run
- * in the Table tab and in the ladders under Tax, and the middle of ten thousand
- * volatile ones in these tiles — and used to say so nowhere. A reader comparing
+ * in the Yearly detail tab and in the ladders under Tax, and the middle of ten
+ * thousand volatile ones in these tiles — and used to say so nowhere. A reader comparing
  * the two finds a discrepancy with no wrong number in it, which is the worst
  * kind to go looking for. The gap is not even consistent in direction: drag
  * pulls the median below a smooth path at retirement, while a random path's
@@ -226,9 +226,9 @@ function Fixes({
 function BasisNote() {
   return (
     <p>
-      Because this is simulated, it will not match the Table tab or the ladders
-      under Tax — those are a single steady run at the return you entered, with
-      no market variation. Two different questions, and neither answer is the
+      Because this is simulated, it will not match the Yearly detail tab or the
+      ladders under Tax — those are a single steady run at the return you entered,
+      with no market variation. Two different questions, and neither answer is the
       other&apos;s error.
     </p>
   )

@@ -7,6 +7,7 @@ import {
   categoryTotal,
   emptyExpenses,
   readExpenses,
+  splitExpenses,
   totalExpenses,
   writeExpenses,
   type ExpenseCategory,
@@ -14,6 +15,7 @@ import {
 import { useWindowReturn } from '@/lib/use-window-return'
 import { cn } from '@/lib/utils'
 import { formatCurrency } from '@/lib/retirement'
+import { MEDICARE_AGE } from '@/lib/aca'
 import {
   caretAfter,
   significantBefore,
@@ -150,10 +152,22 @@ function Group({
       </summary>
       <div className="flex flex-col gap-2 border-t border-border py-3">
         {category.items?.map((item) => (
-          <div key={item.key} className="flex items-center justify-between gap-3">
-            <Label htmlFor={`exp-${item.key}`} className="text-sm text-muted-foreground">
-              {item.label}
-            </Label>
+          <div key={item.key} className="flex items-start justify-between gap-3">
+            <span className="flex min-w-0 flex-col gap-0.5 py-1">
+              <Label
+                htmlFor={`exp-${item.key}`}
+                className="text-sm text-muted-foreground"
+              >
+                {item.label}
+              </Label>
+              {/* At the box rather than in the footnote at the bottom, which
+                  is read after the figures have already been typed. */}
+              {item.note && (
+                <span className="text-xs text-muted-foreground/80 text-pretty">
+                  {item.note}
+                </span>
+              )}
+            </span>
             <AmountInput
               id={`exp-${item.key}`}
               label={`${item.label} per month`}
@@ -175,7 +189,11 @@ function Group({
  * the spending field takes — the planner grosses it up for the tax on the
  * withdrawal that funds it.
  */
-export function ExpenseEstimator({ onApply }: { onApply: (monthly: number) => void }) {
+export function ExpenseEstimator({
+  onApply,
+}: {
+  onApply: (spending: number, healthFrom65: number) => void
+}) {
   const [open, setOpen] = useState(false)
   // Focus the heading, not the first box. Base UI would otherwise focus
   // Housing, and a focused box clears itself — so the dialog would open with
@@ -195,6 +213,9 @@ export function ExpenseEstimator({ onApply }: { onApply: (monthly: number) => vo
     ),
   )
   const total = totalExpenses(values)
+  // Health leaves the spending figure: it does not start until Medicare does,
+  // and the projection charges cover before then for itself.
+  const split = splitExpenses(values)
 
   // Kept for the tab, so closing the dialog and coming back does not cost
   // someone the figures they just worked out.
@@ -220,12 +241,13 @@ export function ExpenseEstimator({ onApply }: { onApply: (monthly: number) => vo
       <DialogContent initialFocus={heading}>
         <DialogHeader>
           <DialogTitle ref={heading} tabIndex={-1} className="outline-none">
-            Estimate your monthly spending
+            What will a month cost once you have stopped working?
           </DialogTitle>
           <DialogDescription>
-            Fill in what you know and leave the rest at nothing. The total
-            becomes your monthly spending, so it is the sum that matters rather
-            than the split.
+            Retirement costs, not today&apos;s — the mortgage may be gone, the
+            commute certainly is, and health cover becomes something you buy
+            rather than something an employer arranges. Fill in what you know
+            and leave the rest at nothing.
           </DialogDescription>
         </DialogHeader>
 
@@ -271,9 +293,26 @@ export function ExpenseEstimator({ onApply }: { onApply: (monthly: number) => vo
 
           <p className="mt-5 border-t border-border pt-4 text-xs text-muted-foreground text-pretty">
             Enter what leaves your account, before any tax on the withdrawal
-            that pays for it — the planner adds that itself. Housing is usually
-            the largest line and the one that moves most in retirement: a
-            mortgage paid off before you stop working takes most of it away.
+            that pays for it — the planner adds that itself. If a figure is one
+            you pay today, ask whether you will still be paying it then: housing
+            and transport are usually the two that move most, and health care is
+            the one that moves the other way.
+          </p>
+          {/* Asked for once, and taken back out. Nobody can price marketplace
+              cover from memory, and the plan already knows everything needed to
+              work it out — income, age, household size. A box here would be a
+              guess standing in for a calculation. */}
+          <p className="mt-3 rounded-md border border-primary/20 bg-accent/40 px-3 py-2 text-xs text-muted-foreground text-pretty">
+            <span className="font-medium text-foreground">
+              Health care is handled apart from the monthly total.
+            </span>{' '}
+            The health lines above are what you pay from {MEDICARE_AGE}, and
+            they are carried separately so they are charged from {MEDICARE_AGE}{' '}
+            rather than from the day you stop working. Cover before then is
+            worked out for you each year from your own income, subsidy included
+            — change that under{' '}
+            <span className="font-medium text-foreground">Saving</span> if your
+            cover comes from somewhere else.
           </p>
         </DialogBody>
 
@@ -290,21 +329,39 @@ export function ExpenseEstimator({ onApply }: { onApply: (monthly: number) => vo
             Start over
           </button>
           <div className="flex items-center gap-3">
+            {/* The two figures shown apart, because they are applied apart and
+                start at different times. Showing only the sum would leave the
+                reader wondering why the spending field took a smaller number
+                than the one they had been looking at. */}
             <div className="text-right">
               <p className="text-lg font-semibold tabular-nums text-foreground">
-                {formatCurrency(total)}
-                <span className="text-sm font-normal text-muted-foreground"> a month</span>
+                {formatCurrency(split.spending)}
+                <span className="text-sm font-normal text-muted-foreground">
+                  {' '}
+                  a month
+                </span>
               </p>
-              <p className="text-xs text-muted-foreground tabular-nums">
-                {formatCurrency(total * 12)} a year
-              </p>
+              {split.fromSixtyFive > 0 ? (
+                <p className="text-xs text-muted-foreground text-pretty">
+                  plus{' '}
+                  <span className="font-medium tabular-nums text-foreground">
+                    {formatCurrency(split.fromSixtyFive)}
+                  </span>{' '}
+                  a month of health care, carried separately and charged from{' '}
+                  {MEDICARE_AGE}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  {formatCurrency(split.spending * 12)} a year
+                </p>
+              )}
             </div>
             {/* Nothing entered means nothing to apply, and applying zero would
                 wipe a spending figure the user may already have set. */}
             {total > 0 ? (
               <DialogClose
                 render={<Button type="button" />}
-                onClick={() => onApply(total)}
+                onClick={() => onApply(split.spending, split.fromSixtyFive)}
               >
                 Use this
               </DialogClose>

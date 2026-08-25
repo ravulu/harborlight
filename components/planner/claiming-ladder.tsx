@@ -187,8 +187,8 @@ export function ClaimingLadder({
           <span className="font-medium text-foreground">
             the same figure the year-by-year table ends on
           </span>{' '}
-          — you can check it against the last line of the Table tab, and it will
-          agree to the dollar. It will not agree with the tiles at the top of the
+          — you can check it against the last line of the Yearly detail tab, and
+          it will agree to the dollar. It will not agree with the tiles at the top of the
           projection: those are medians across ten thousand volatile markets,
           which is a different question, and neither one is the other&apos;s
           error.

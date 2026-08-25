@@ -123,6 +123,16 @@ export const retirementPlans = pgTable('retirement_plans', {
   spendingStep2Monthly: real('spendingStep2Monthly').notNull().default(0),
 
   // Social Security and taxes
+  /**
+   * How health cover is paid for between retiring and Medicare. Defaults to
+   * the marketplace, which is what most people who stop before 65 are on —
+   * and which the projection can price for itself, so nobody has to guess it.
+   */
+  healthCoverBefore65: text('healthCoverBefore65').notNull().default('marketplace'),
+  healthPremiumMonthly: real('healthPremiumMonthly').notNull().default(0),
+  /** Medicare-side costs from 65, kept out of the single spending figure. */
+  healthAfter65Monthly: real('healthAfter65Monthly').notNull().default(0),
+
   socialSecurityMonthly: real('socialSecurityMonthly').notNull().default(0),
   socialSecurityAge: integer('socialSecurityAge').notNull().default(67),
   socialSecurityCola: real('socialSecurityCola').notNull().default(2.8),

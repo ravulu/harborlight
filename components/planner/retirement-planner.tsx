@@ -40,6 +40,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildInsights } from '@/lib/insights'
 import { INSIGHTS_ID } from '@/components/planner/insights-link'
+import { MEDICARE_AGE } from '@/lib/aca'
 import { WhatsStillOpen } from '@/components/planner/whats-still-open'
 import { compareConversions, type ConversionComparison } from '@/lib/conversions'
 import { record } from '@/lib/usage'
@@ -547,6 +548,7 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
   const hasSurplus = result.rows.some((r) => r.surplus > 0)
   const hasShortfall = result.rows.some((r) => r.unfunded > 0)
   const hasIrmaa = result.rows.some((r) => r.irmaaSurcharge > 0)
+  const hasHealth = result.rows.some((r) => r.healthPremium > 0)
   const hasMatch = result.rows.some((r) => r.employerMatch > 0)
   const hasHsa = result.rows.some((r) => r.hsaBalance > 0)
 
@@ -585,6 +587,17 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
           having had a higher income two years earlier. It is a premium rather
           than a tax, so it is not in the Tax column — it is spending the
           withdrawal beside it had to cover.
+        </p>
+      )}
+
+      {hasHealth && (
+        <p className="text-xs text-muted-foreground text-pretty">
+          <span className="font-medium text-foreground">Health</span> is what
+          cover costs you that year. Before {MEDICARE_AGE} it is worked out from
+          that year&apos;s own income — the subsidy is already taken off — and
+          from {MEDICARE_AGE} it is what you entered as the cost on top of
+          Medicare. Like the column beside it, a premium rather than a tax, and
+          funded by the withdrawal on the same row.
         </p>
       )}
 
@@ -680,6 +693,14 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
                   title="The Medicare surcharge for having had a higher income two years earlier — a premium, not a tax"
                 >
                   Medicare
+                </th>
+              )}
+              {hasHealth && (
+                <th
+                  className="px-3 py-2 font-medium text-right"
+                  title="What health cover costs you that year: marketplace before 65, net of any subsidy; what you entered on top of Medicare from 65"
+                >
+                  Health
                 </th>
               )}
               <th className="px-3 py-2 font-medium text-right">Growth</th>
@@ -778,6 +799,11 @@ function YearTable({ result }: { result: ReturnType<typeof simulate> }) {
                 {hasIrmaa && (
                   <td className="px-3 py-1.5 text-right text-muted-foreground">
                     {r.irmaaSurcharge >= 1 ? fmt(r.irmaaSurcharge) : '—'}
+                  </td>
+                )}
+                {hasHealth && (
+                  <td className="px-3 py-1.5 text-right text-muted-foreground">
+                    {r.healthPremium >= 1 ? fmt(r.healthPremium) : '—'}
                   </td>
                 )}
                 <td className="px-3 py-1.5 text-right text-muted-foreground">

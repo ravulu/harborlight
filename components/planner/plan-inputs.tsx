@@ -19,6 +19,7 @@ import {
   FULL_RETIREMENT_AGE,
 } from '@/lib/social-security'
 import { taxPhases } from '@/lib/tax'
+import { MEDICARE_AGE } from '@/lib/aca'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
@@ -903,6 +904,97 @@ function AccountNote({ inputs }: { inputs: PlanDraft }) {
 
 
 
+/**
+ * How health cover is paid for between stopping work and Medicare.
+ *
+ * One question replacing a figure nobody has. "What does marketplace cover
+ * cost you" cannot be answered from memory — it depends on income, age,
+ * household size and a benchmark premium — but "will you be on the
+ * marketplace" can be answered by anyone, and the projection already holds
+ * everything needed to price the rest.
+ *
+ * Hidden entirely for a plan that retires at 65 or later, where there is no
+ * gap to cover and the question is noise.
+ */
+function HealthCover({
+  inputs,
+  set,
+}: {
+  inputs: PlanDraft
+  set: <K extends keyof PlanDraft>(key: K, value: PlanDraft[K]) => void
+}) {
+  const gap = Math.max(0, MEDICARE_AGE - Math.max(inputs.retirementAge, inputs.currentAge))
+  if (gap <= 0) return null
+
+  const options = [
+    { value: 'marketplace' as const, label: 'Marketplace' },
+    { value: 'own' as const, label: 'A plan of my own' },
+    { value: 'none' as const, label: 'Costs me nothing' },
+  ]
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+      <div className="flex flex-col gap-0.5">
+        <Label className="text-sm text-foreground">
+          Health cover until Medicare
+        </Label>
+        <span className="text-xs text-muted-foreground text-pretty">
+          You stop at {Math.max(inputs.retirementAge, inputs.currentAge)} and
+          Medicare starts at {MEDICARE_AGE}, so {gap}{' '}
+          {gap === 1 ? 'year needs' : 'years need'} covering.
+        </span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-1 rounded-md bg-muted/60 p-1">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => set('healthCoverBefore65', o.value)}
+            aria-pressed={inputs.healthCoverBefore65 === o.value}
+            className={cn(
+              'rounded px-2 py-1.5 text-xs font-medium transition-colors',
+              inputs.healthCoverBefore65 === o.value
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      {inputs.healthCoverBefore65 === 'marketplace' && (
+        <p className="text-xs text-muted-foreground text-pretty">
+          Worked out for you each year from that year&apos;s own income —
+          subsidy included, and charged on top of your spending. Nothing to
+          enter, and nothing to put in the spending figure.
+        </p>
+      )}
+      {inputs.healthCoverBefore65 === 'own' && (
+        <NumberField
+          id="healthPremiumMonthly"
+          label="What it costs a month (today's $)"
+          value={inputs.healthPremiumMonthly}
+          min={0}
+          max={5000}
+          step={25}
+          prefix="$"
+          placeholder="e.g. 700"
+          onChange={(v) => set('healthPremiumMonthly', v ?? 0)}
+        />
+      )}
+      {inputs.healthCoverBefore65 === 'none' && (
+        <p className="text-xs text-muted-foreground text-pretty">
+          Nothing is charged for cover before {MEDICARE_AGE}. Right for cover a
+          former employer pays for, and wrong if you are simply unsure — the
+          marketplace figure is the safer answer in that case.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function WithdrawalNote({
   inputs,
   median,
@@ -1755,8 +1847,17 @@ export function PlanInputsPanel({
           />
           {/* For anyone who knows what their life costs but not the total. */}
           <ExpenseEstimator
-            onApply={(monthly) => set('monthlyRetirementSpending', monthly)}
+            onApply={(monthly, healthFrom65) => {
+              // Two fields, because the dialog now produces two figures: the
+              // health part does not start until Medicare does.
+              onChange({
+                ...inputs,
+                monthlyRetirementSpending: monthly,
+                healthAfter65Monthly: healthFrom65,
+              })
+            }}
           />
+          <HealthCover inputs={inputs} set={set} />
           <WithdrawalNote inputs={inputs} median={medianAtRetirement} />
           <SpendingSteps inputs={inputs} set={set} setMany={setMany} />
           <SliderField

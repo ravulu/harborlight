@@ -34,6 +34,12 @@ export function planToInputs(p: RetirementPlan): PlanInputs {
     spendingStep1Monthly: p.spendingStep1Monthly,
     spendingStep2Age: p.spendingStep2Age,
     spendingStep2Monthly: p.spendingStep2Monthly,
+    healthCoverBefore65:
+      p.healthCoverBefore65 === 'own' || p.healthCoverBefore65 === 'none'
+        ? p.healthCoverBefore65
+        : 'marketplace',
+    healthPremiumMonthly: p.healthPremiumMonthly,
+    healthAfter65Monthly: p.healthAfter65Monthly,
     socialSecurityMonthly: p.socialSecurityMonthly,
     socialSecurityAge: p.socialSecurityAge,
     socialSecurityCola: p.socialSecurityCola,

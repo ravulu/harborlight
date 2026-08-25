@@ -17,6 +17,16 @@
 export interface ExpenseItem {
   key: string
   label: string
+  /**
+   * How this line differs from what the same line costs today, where it
+   * differs enough to be worth saying at the box rather than in a footnote.
+   *
+   * The categories here have always been retirement costs — Medicare and
+   * long-term care are not a 53-year-old's bills — but the dialog never said
+   * so, and someone filling it in from memory reaches for what they pay now.
+   * On the single most leveraged input in the model, that is worth a sentence.
+   */
+  note?: string
 }
 
 export interface ExpenseCategory {
@@ -33,7 +43,11 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
     label: 'Housing',
     hint: 'Everything the roof costs, insurance on it included',
     items: [
-      { key: 'mortgage', label: 'Mortgage or rent' },
+      {
+        key: 'mortgage',
+        label: 'Mortgage or rent',
+        note: 'Nothing here if it is paid off before you stop working.',
+      },
       { key: 'propertyTax', label: 'Property tax' },
       { key: 'homeInsurance', label: 'Home or renters insurance' },
       { key: 'homeUpkeep', label: 'Maintenance and repairs' },
@@ -67,7 +81,11 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
     hint: 'Running the car; its insurance sits under Insurance',
     items: [
       { key: 'carPayment', label: 'Car payment or lease' },
-      { key: 'fuel', label: 'Fuel and charging' },
+      {
+        key: 'fuel',
+        label: 'Fuel and charging',
+        note: 'No commute once you stop, so usually well below today.',
+      },
       { key: 'carUpkeep', label: 'Servicing and repairs' },
       { key: 'registration', label: 'Registration and license' },
       { key: 'transit', label: 'Transit, taxis and parking' },
@@ -76,9 +94,15 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
   {
     key: 'health',
     label: 'Health care',
-    hint: 'Premiums and what you pay on top of them',
+    hint: 'From 65 only — carried separately, not part of the monthly total',
     items: [
-      { key: 'partB', label: 'Medicare Part B' },
+      {
+        key: 'partB',
+        label: 'Medicare Part B',
+        note:
+          'The standard premium only. The projection works out the income-based ' +
+          'surcharge and charges it separately, so leave that out here.',
+      },
       { key: 'medigap', label: 'Medigap or Advantage plan' },
       { key: 'partD', label: 'Part D and prescriptions' },
       { key: 'dental', label: 'Dental and vision' },
@@ -150,6 +174,24 @@ export const categoryTotal = (c: ExpenseCategory, values: Record<string, number>
 
 export const totalExpenses = (values: Record<string, number>) =>
   ALL_KEYS.reduce((sum, k) => sum + (values[k] || 0), 0)
+
+/** The category whose cost does not begin until Medicare does. */
+export const HEALTH_CATEGORY = 'health'
+
+/**
+ * The two figures this dialog produces, because they start at different times.
+ *
+ * A single monthly total cannot represent a cost that begins at 65: someone
+ * retiring at 55 who put Medigap and Part D into their spending was charged
+ * them for ten years before Medicare began — and charged marketplace cover for
+ * those same years on top of it. So health leaves the spending figure and is
+ * carried separately, to be charged from 65.
+ */
+export function splitExpenses(values: Record<string, number>) {
+  const health = EXPENSE_CATEGORIES.find((c) => c.key === HEALTH_CATEGORY)
+  const fromSixtyFive = health ? categoryTotal(health, values) : 0
+  return { spending: totalExpenses(values) - fromSixtyFive, fromSixtyFive }
+}
 
 /** Kept for the tab that opened the dialog, and no longer than that. */
 const STORAGE_KEY = 'harborlight_expenses'

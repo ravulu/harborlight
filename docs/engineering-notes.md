@@ -98,6 +98,59 @@ needs an explicit decision.
 
 ---
 
+## 3b. The projection does not charge health premiums
+
+`lib/aca.ts` is imported by `lib/conversions.ts` and by **nothing in
+`lib/retirement.ts`**. The base projection charges the IRMAA *surcharge*
+(`irmaaSurcharge`) and never the standard Part B premium, and never a
+marketplace premium at all.
+
+That division is defensible — the surcharge depends on the plan's own income,
+the premium does not — but it means **every health premium reaches the plan
+only if somebody types it into the spending figure.** For anyone retiring
+before 65 that is the largest single line in their early retirement, and until
+2026-08-25 the expense estimator did not even offer a box for it: the health
+category listed Medicare items only, so an early retiree saw nothing that
+applied to them and entered nothing.
+
+**Resolved, 2026-08-25: the projection now prices it.** `healthCoverBefore65`
+on `PlanInputs` takes `marketplace` (priced per year), `own` (a figure the
+household enters, for retiree cover or COBRA) or `none`. The estimator no
+longer asks for a marketplace figure at all, and says why.
+
+The switch is what makes it safe. Double-counting was the objection to
+projecting it, and the answer is that the question changed: *"what does
+marketplace cover cost you"* is unanswerable, *"will you be on the
+marketplace"* is answerable by anyone. One control replaces a guess.
+
+**The circularity, and why the year is solved more than once.** The premium is
+set by the same year's income, and withdrawing to pay it raises that income.
+IRMAA escapes this with its two-year lookback; ACA cannot. `simulate` therefore
+runs the withdrawal solve up to `HEALTH_SOLVE_PASSES` times per retirement year
+until the figure settles. Two properties matter and both are tested in
+`lib/health-cover.test.ts`:
+
+- **Monotone.** The premium is never revised downward. The sequence only rises,
+  so the larger value is where it would land anyway — and it terminates at the
+  400% cliff, where the step is not gradual and a naive iteration oscillates.
+- **The row adds up.** The loop breaks on the figure the *solve actually
+  funded*, never on the one just computed from it. A row reporting a premium
+  larger than the withdrawal raised to pay for it would be lying about its own
+  arithmetic, and the year-by-year table would show it.
+
+The cliff is not theoretical. On a plan retiring at 58 with $150k brokerage and
+$1.1M deferred, the premium runs $1,420 a year at 58–59 (brokerage draws keep
+countable income low, subsidy ~$10,500), then $4,911 at 60, then **$13,113 at
+61 with the subsidy gone entirely** — the brokerage is spent, withdrawals come
+from the 401(k), and MAGI crosses 400%. Lifetime cover: $62,047, and $220,000
+off the closing balance. None of that was in any projection before.
+
+**Still true:** the standard Part B premium is charged nowhere. From 65 the
+plan charges only `irmaaSurcharge`, and the expense estimator's health category
+covers 65-onward costs — that division is now stated in the category hint.
+
+---
+
 ## 4. Rollback map
 
 Recent features were built to be removed cleanly. Each is new files plus a
@@ -149,6 +202,39 @@ from the list makes both impossible.
 
 **So adding or removing an action here is one line.** Do not reintroduce a
 separate guard.
+
+### Health cover before 65
+
+Touches the withdrawal loop, so it is the least isolated change here.
+
+- `lib/retirement.ts`: `healthCoverBefore65` / `healthPremiumMonthly` on
+  `PlanInputs`, `healthPremium` / `healthSubsidy` on `YearRow`,
+  `totalHealthPremium` on `PlanResult`, `HEALTH_SOLVE_PASSES`, and the
+  settling loop wrapping the withdrawal solve.
+- `lib/db/schema.ts`: two columns, both with defaults. **Needs `db:push`.**
+- `lib/plan.ts`: the mapping, which coerces an unrecognised stored value to
+  `marketplace` rather than trusting it.
+- `lib/tax.ts`: `totalHealthPremium` on the phase summary.
+- `plan-inputs.tsx`: the `HealthCover` control. `tax-phases.tsx`: one `Line`.
+- `lib/health-cover.test.ts` is new.
+
+**Reverting changes every early-retirement plan's numbers back**, which is the
+point of it existing. The DB columns can stay — they are additive and unread if
+the code goes.
+
+### Expense estimator reframing
+
+- `lib/expenses.ts`: `note?: string` on `ExpenseItem`, the `marketplace` line,
+  four notes.
+- `expense-estimator.tsx`: renders `item.note`, retitled dialog, rewritten
+  footnote.
+- `lib/expenses.test.ts` is new.
+
+Adding a key is safe for stored figures: `readExpenses` starts from
+`emptyExpenses()` and only overwrites keys it recognises, so an older
+sessionStorage payload loads with the new line at zero. Removing a key is also
+safe for the same reason. Note that these figures live in **sessionStorage**,
+so they do not survive the tab — see §8 item 2 on keeping the split.
 
 ### Insights deep link
 

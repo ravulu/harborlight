@@ -234,6 +234,16 @@ export function TaxPhases({
                         value={money(p.totalIrmaa)}
                       />
                     )}
+                    {/* Beside the tax for the same reason the surcharge is: a
+                        premium is not a tax. Shown at all because the plan
+                        works this figure out rather than being told it, and a
+                        cost nobody entered has to be visible somewhere. */}
+                    {p.totalHealthPremium > 0 && (
+                      <Line
+                        label="Health cover before 65"
+                        value={money(p.totalHealthPremium)}
+                      />
+                    )}
                   </dl>
                   <Why
                     rates={p.rates}
@@ -643,6 +653,18 @@ function RothConversions({
 }) {
   const pct = (v: number) => `${Math.round(v * 100)}%`
   const endAge = inputs.endAge
+  /**
+   * Whether losing the subsidy is a property of a choice or of the plan.
+   *
+   * The red on that column exists to tell rows apart — this amount costs you
+   * the credit, that one keeps it. When every row crosses, it distinguishes
+   * nothing and only repeats what the panel below already says at length, so
+   * it is dropped. A household that is over the line whatever it converts is
+   * not being warned about a choice; it is being told about its income, and
+   * that is the panel's job rather than the column's.
+   */
+  const cliffIsUnavoidable =
+    c.options.length > 0 && c.options.every((o) => o.crossesCliff)
   // Named from the table rather than hardcoded, so the note cannot drift from
   // the brackets the projection actually charged.
   const bands = FEDERAL[inputs.filingStatus].brackets
@@ -774,7 +796,11 @@ function RothConversions({
                   </td>
                   {c.beforeMedicare && (
                     <td className="px-3 py-1.5 text-right text-foreground">
-                      <span className={cn(o.crossesCliff && 'text-destructive')}>
+                      <span
+                        className={cn(
+                          o.crossesCliff && !cliffIsUnavoidable && 'text-destructive',
+                        )}
+                      >
                         {o.acaPerYear >= 1 ? money(o.acaPerYear) : 'none'}
                       </span>
                       {/* What the figure above is, said rather than left to be
@@ -784,7 +810,7 @@ function RothConversions({
                       <span
                         className={cn(
                           'block text-[11px]',
-                          o.crossesCliff
+                          o.crossesCliff && !cliffIsUnavoidable
                             ? 'font-medium text-destructive'
                             : 'text-muted-foreground',
                         )}
@@ -959,20 +985,37 @@ function RothConversions({
             </span>{' '}
             a year to this plan.
           </p>
-          {c.cliffRows.length > 0 && (
+          {/* Naming the rows only helps while there are rows it does not
+              apply to. Where every one crosses — doing nothing included — the
+              list is every amount in the table, and the useful sentence is not
+              which rows but that the choice is not what put you over. */}
+          {cliffIsUnavoidable ? (
             <p className="text-justify hyphens-auto">
               <span className="font-medium text-destructive">
-                {c.cliffRows.length === 1
-                  ? 'One amount above crosses it'
-                  : `${c.cliffRows.length} of the amounts above cross it`}
-                :
+                Every amount above crosses it, including moving nothing at all.
               </span>{' '}
-              {c.cliffRows
-                .map((o) => (o.drainsPot ? 'all of it' : money(o.annual)))
-                .join(', ')}
-              . Those rows are paying full price for cover, which is why their
-              all-in cost jumps rather than climbing.
+              This plan&apos;s income is over the line before any conversion is
+              made, so the subsidy is lost either way and no amount in the table
+              can win it back. What the rows still differ on is tax — read the
+              column beside this one, and treat the cover cost as the same
+              charge under all of them.
             </p>
+          ) : (
+            c.cliffRows.length > 0 && (
+              <p className="text-justify hyphens-auto">
+                <span className="font-medium text-destructive">
+                  {c.cliffRows.length === 1
+                    ? 'One amount above crosses it'
+                    : `${c.cliffRows.length} of the amounts above cross it`}
+                  :
+                </span>{' '}
+                {c.cliffRows
+                  .map((o) => (o.drainsPot ? 'all of it' : money(o.annual)))
+                  .join(', ')}
+                . Those rows are paying full price for cover, which is why their
+                all-in cost jumps rather than climbing.
+              </p>
+            )
           )}
           <p className="text-justify hyphens-auto">
             <span className="font-medium text-foreground">

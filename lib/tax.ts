@@ -687,6 +687,8 @@ export interface TaxPhase {
    * either total would be describing a bill nobody sends.
    */
   totalIrmaa: number
+  /** Health cover before Medicare, which the plan prices rather than asks for. */
+  totalHealthPremium: number
   /** Whether the 401(k) or IRA is actually drawn on during it. */
   drawsDeferred: boolean
   /**
@@ -746,6 +748,7 @@ export function taxPhases(
     federalGainsTax: number
     earlyWithdrawalPenalty: number
     irmaaSurcharge: number
+    healthPremium: number
     capitalGains: number
     stateTax: number
     socialSecurity: number
@@ -917,6 +920,7 @@ export function taxPhases(
       totalStateTax: sumAcross(from, to, (r) => r.stateTax),
       totalPenalty: sumAcross(from, to, (r) => r.earlyWithdrawalPenalty),
       totalIrmaa: sumAcross(from, to, (r) => r.irmaaSurcharge),
+      totalHealthPremium: sumAcross(from, to, (r) => r.healthPremium),
       drawsDeferred: deferredDrawnIn(from, to),
       sources: sourcesAcross(from, to),
       rates: real,
