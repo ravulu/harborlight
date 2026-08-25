@@ -2,7 +2,7 @@
 
 import { db } from '@/lib/db'
 import { retirementPlans, user, feedback, events } from '@/lib/db/schema'
-import { and, countDistinct, desc, eq, gte, lt, sql } from 'drizzle-orm'
+import { and, countDistinct, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm'
 import { requireAdmin } from '@/lib/admin'
 
 const LIMIT = 200
@@ -185,7 +185,35 @@ export interface UsageSummary {
   pages: { path: string; visits: number }[]
   /** Roughly where visits came from. Country only — no address is stored. */
   places: { country: string; region: string; city: string; visits: number }[]
+  /**
+   * The last few visits, each with what it did, in order.
+   *
+   * Grouped by session rather than by person, because a person is not
+   * something this table knows. `session` is a sessionStorage id: it lasts one
+   * browser run, cannot follow anyone across days or sites, and is the whole
+   * reason none of this needs a cookie or a banner. A returning visitor is
+   * simply a new visit here, which is the right unit for asking where people
+   * give up anyway.
+   *
+   * Everything else on this page is a rate, and a rate cannot answer "is the
+   * tracking working right now" — the question actually being asked when
+   * somebody opens this after a change.
+   */
+  recentSessions: {
+    session: string
+    startedAt: Date
+    endedAt: Date
+    isAuthed: boolean
+    place: string
+    referrer: string
+    /** How far along the funnel this visit got, by label. */
+    reached: string
+    events: { id: number; name: string; path: string; at: Date }[]
+  }[]
 }
+
+/** Enough to see the last stretch of activity, not a log viewer. */
+const RECENT_SESSIONS = 12
 
 /** Read in order, so the drop between any two is the interesting number. */
 const FUNNEL: { name: string; label: string }[] = [
@@ -277,6 +305,46 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
     .orderBy(desc(countDistinct(events.session)))
     .limit(12)
 
+  // The most recent visits first, then everything each of them did. Two
+  // queries rather than one: a limit on events would cut a visit in half and
+  // show a visit that landed but apparently never left the page.
+  const latest = await db
+    .select({ session: events.session, last: sql<Date>`max(${events.createdAt})` })
+    .from(events)
+    .where(window)
+    .groupBy(events.session)
+    .orderBy(desc(sql`max(${events.createdAt})`))
+    .limit(RECENT_SESSIONS)
+
+  const ids = latest.map((r) => r.session)
+  const rows = ids.length
+    ? await db
+        .select()
+        .from(events)
+        .where(inArray(events.session, ids))
+        .orderBy(events.createdAt)
+    : []
+
+  const furthest = (names: Set<string>) =>
+    [...FUNNEL].reverse().find((f) => names.has(f.name))?.label ?? '—'
+
+  const recentSessions = ids.map((id) => {
+    const mine = rows.filter((r) => r.session === id)
+    const withPlace = mine.find((r) => r.city || r.region || r.country)
+    return {
+      session: id,
+      startedAt: mine[0].createdAt,
+      endedAt: mine[mine.length - 1].createdAt,
+      isAuthed: mine.some((r) => r.isAuthed),
+      place: withPlace
+        ? [withPlace.city, withPlace.region, withPlace.country].filter(Boolean).join(', ')
+        : '',
+      referrer: mine.find((r) => r.referrer)?.referrer ?? '',
+      reached: furthest(new Set(mine.map((r) => r.name))),
+      events: mine.map((r) => ({ id: r.id, name: r.name, path: r.path, at: r.createdAt })),
+    }
+  })
+
   return {
     from,
     to,
@@ -293,5 +361,6 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
     referrers,
     pages,
     places,
+    recentSessions,
   }
 }

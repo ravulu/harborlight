@@ -175,7 +175,8 @@ export const feedback = pgTable('feedback', {
   message: text('message').notNull(),
   /** The page they were on when they wrote it. */
   path: text('path').notNull().default(''),
-  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  /** With a time zone, for the reason given on `events.createdAt`. */
+  createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
 })
 
 export type Feedback = typeof feedback.$inferSelect
@@ -220,7 +221,18 @@ export const events = pgTable(
     country: text('country').notNull().default(''),
     region: text('region').notNull().default(''),
     city: text('city').notNull().default(''),
-    createdAt: timestamp('createdAt').notNull().defaultNow(),
+    /**
+     * With a time zone, unlike the Better Auth tables above.
+     *
+     * A bare `timestamp` stores wall-clock with nothing recording which clock,
+     * so it reads correctly only while the process that parses it happens to
+     * run in the same zone as the server that wrote it. That held on Vercel
+     * and not on a laptop, and the difference once led to reading these very
+     * rows five hours out and concluding the wrong thing about them. Storing
+     * the instant instead makes a Central-time display a formatting choice
+     * rather than a calculation that can be wrong.
+     */
+    createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     // The funnel counts distinct sessions per event name over a date range,

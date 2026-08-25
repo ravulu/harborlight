@@ -1,12 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
-import { Activity } from 'lucide-react'
+import { Activity, ChevronDown } from 'lucide-react'
 
 import { getUsage, type UsageSummary } from '@/app/actions/admin'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { adminDay, adminTimeOnly, adminZoneLabel } from '@/lib/time'
 
 function isoDay(d: Date) {
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -224,8 +225,95 @@ export function Usage() {
               </div>
             </div>
           )}
+
+          {data.recentSessions.length > 0 && (
+            <Visits sessions={data.recentSessions} />
+          )}
         </div>
       )}
     </Card>
+  )
+}
+
+/**
+ * The last few visits, each one expandable into what it actually did.
+ *
+ * By visit rather than by person: `session` lasts one browser run and is not
+ * tied to an account, which is what keeps this table free of a cookie banner.
+ * A signed-in visit says so, but it still cannot be joined to who it was.
+ *
+ * Collapsed by default and opened one at a time — twelve visits of five events
+ * each is sixty rows, which is a log rather than a view. The summary line
+ * carries the part that is usually enough: when, how far, from where.
+ */
+function Visits({ sessions }: { sessions: UsageSummary['recentSessions'] }) {
+  return (
+    <div className="border-t border-border pt-4">
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        Latest visits{' '}
+        {/* Named, because an unlabelled time invites being read against
+            whatever clock the reader happens to be sitting next to. */}
+        <span className="normal-case tracking-normal text-muted-foreground/70">
+          · times in {adminZoneLabel()}
+        </span>
+      </p>
+
+      <div className="mt-2 flex flex-col gap-1.5">
+        {sessions.map((v) => (
+          <details
+            key={v.session}
+            className="group rounded-lg border border-border px-3 [&_summary::-webkit-details-marker]:hidden"
+          >
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-2 text-left">
+              <span className="flex min-w-0 flex-col">
+                <span className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                  <span className="font-medium text-foreground">{v.reached}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {v.events.length}{' '}
+                    {v.events.length === 1 ? 'event' : 'events'}
+                  </span>
+                  {v.isAuthed && (
+                    <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] font-medium text-foreground">
+                      signed in
+                    </span>
+                  )}
+                </span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {adminDay(v.startedAt)} · {adminTimeOnly(v.startedAt)}
+                  {v.place ? ` · ${v.place}` : ''}
+                  {v.referrer ? ` · from ${v.referrer}` : ''}
+                </span>
+              </span>
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+            </summary>
+
+            <ul className="flex flex-col border-t border-border py-1.5">
+              {v.events.map((e) => (
+                <li
+                  key={e.id}
+                  className="flex items-baseline gap-3 py-1 text-sm"
+                >
+                  <span className="w-24 shrink-0 tabular-nums text-xs text-muted-foreground">
+                    {adminTimeOnly(e.at)}
+                  </span>
+                  <span className="shrink-0 font-medium text-foreground">
+                    {e.name}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {e.path}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            {/* Last, and small: it identifies the run rather than the person,
+                and is here only so two visits can be told apart. */}
+            <p className="border-t border-border py-1.5 text-[10px] text-muted-foreground/70">
+              visit {v.session.slice(0, 8)}
+            </p>
+          </details>
+        ))}
+      </div>
+    </div>
   )
 }

@@ -1,6 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
+
+import { adminTime } from '@/lib/time'
 import { feedbackInRange, type FeedbackHit } from '@/app/actions/admin'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -181,9 +183,9 @@ export function FeedbackRange() {
                 {r.message}
               </p>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                <span className="tabular-nums">
-                  {new Date(r.createdAt).toLocaleString()}
-                </span>
+                {/* Central, named — not the browser's zone, which made the
+                    same row read differently depending on who opened it. */}
+                <span className="tabular-nums">{adminTime(r.createdAt)}</span>
                 <span aria-hidden>·</span>
                 {/* Distinguished, because they mean different things: one is
                     who they were signed in as, the other is where they asked
