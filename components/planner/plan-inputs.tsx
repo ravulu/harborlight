@@ -7,7 +7,6 @@ import { withDerivedRates } from '@/lib/planner-draft'
 import {
   STATE_TAXES,
   FILING_STATUSES,
-  CUSTOM_RATES,
   findState,
 } from '@/lib/state-tax'
 import {
@@ -995,6 +994,130 @@ function HealthCover({
   )
 }
 
+/**
+ * Where tax comes from, which is now only one place.
+ *
+ * There used to be a choice here: derive the rates from the brackets, or type
+ * a flat pair in yourself. Nought of a hundred saved plans ever took the
+ * second, and taking it silently switched the projection onto a levy that
+ * could not tell a Roth dollar from a 401(k) one. A branch nobody used, that
+ * quietly made the answer worse, is not an escape hatch — it is a trap with a
+ * label on it. Both the option and the engine behind it are gone.
+ */
+function TaxSettings({
+  inputs,
+  onChange,
+}: {
+  inputs: PlanDraft
+  onChange: (next: PlanDraft) => void
+}) {
+  return (
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="filingStatus" className="text-sm text-muted-foreground">
+            Filing status
+          </Label>
+          <select
+            id="filingStatus"
+            value={inputs.filingStatus}
+            onChange={(e) =>
+              onChange(
+                withDerivedRates({
+                  ...inputs,
+                  filingStatus: e.target.value as PlanDraft['filingStatus'],
+                }),
+              )
+            }
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
+          >
+            {FILING_STATUSES.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <DerivedRate
+          label="Federal tax rate"
+          value={inputs.federalTaxRate}
+          note="worked out from the brackets"
+        />
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="taxState" className="text-sm text-muted-foreground">
+            State
+          </Label>
+          <select
+            id="taxState"
+            value={inputs.taxState}
+            onChange={(e) =>
+              onChange(withDerivedRates({ ...inputs, taxState: e.target.value }))
+            }
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
+          >
+            <option value="">No state income tax</option>
+            {STATE_TAXES.map((st) => (
+              <option key={st.code} value={st.code}>
+                {st.name}
+                {st.note ? ` — ${st.note}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <DerivedRate
+          label="State tax rate"
+          value={inputs.stateTaxRate}
+          note={
+            findState(inputs.taxState)
+              ? 'worked out from the state brackets'
+              : 'no state chosen, so none is charged'
+          }
+        />
+      </div>
+
+      <TaxNote inputs={inputs} />
+    </div>
+  )
+}
+
+/**
+ * A rate the plan worked out, shown as a figure rather than a control.
+ *
+ * These two were sliders, and they were the only sliders on the page that did
+ * not set anything: `withDerivedRates` recomputes both on every edit and on
+ * load, so whatever was dragged was overwritten by the next keystroke. What
+ * dragging one *did* do was silently set the state to Custom, which switches
+ * the projection off the brackets and onto a flat levy — on one test plan the
+ * difference between $158,000 and $962,000 of lifetime tax. A control that
+ * looks like a refinement and is really an off switch for the tax engine is
+ * worse than no control, so the flat path now has to be chosen by name, from
+ * the State list, where it is labelled.
+ */
+function DerivedRate({
+  label,
+  value,
+  note,
+}: {
+  label: string
+  value: number
+  note: string
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="flex items-baseline gap-2">
+        <span className="text-lg font-semibold tabular-nums text-foreground">
+          {Math.round(value * 10) / 10}%
+        </span>
+        <span className="text-xs text-muted-foreground text-pretty">{note}</span>
+      </span>
+    </div>
+  )
+}
+
 function WithdrawalNote({
   inputs,
   median,
@@ -1127,8 +1250,10 @@ function WithdrawalNote({
  * Refreshes the two rates from the figures, while a state is selected.
  *
  * Done here rather than in an effect so the rates change in the same update
- * as the figure that moved them; editing either rate by hand clears the state
- * and stops this, which is what keeps the override honest.
+ * as the figure that moved them. The rates cannot be edited while a state is
+ * selected — they are shown as a readout — so nothing can be typed here for
+ * this to overwrite: the rates are shown as a readout, and there is no longer
+ * any way to type one in.
  */
 /**
  * A named, collapsible group of fields. Only the section being edited needs
@@ -1916,10 +2041,10 @@ export function PlanInputsPanel({
               and for the health-insurance subsidy before 65.
             </Field>
             <Field name="Federal and state tax rate">
-              only used if you would rather set a flat rate by hand than have it
-              derived. It is treated as one levy on withdrawals, so it cannot
-              tell one account from another and the Tax tab has less to show
-              you.
+              a readout, not a setting. Both are what the brackets and your
+              state came to on the figures you entered, so they move as those
+              figures do — the projection works tax out year by year and by the
+              account each dollar came from, rather than applying a rate.
             </Field>
             <Field name="What state tax leaves out">
               a state is priced from its brackets and standard deduction only.
@@ -1941,88 +2066,7 @@ export function PlanInputsPanel({
           Math.round((inputs.federalTaxRate + inputs.stateTaxRate) * 10) / 10
         }% combined${findState(inputs.taxState) ? `, ${findState(inputs.taxState)!.name}` : ''}`}
       >
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="filingStatus" className="text-sm text-muted-foreground">
-            Filing status
-          </Label>
-          <select
-            id="filingStatus"
-            value={inputs.filingStatus}
-            onChange={(e) =>
-              onChange(
-                withDerivedRates({
-                  ...inputs,
-                  filingStatus: e.target.value as PlanDraft['filingStatus'],
-                }),
-              )
-            }
-            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
-          >
-            {FILING_STATUSES.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <SliderField
-          id="federalTaxRate"
-          label="Federal tax rate"
-          value={inputs.federalTaxRate}
-          min={0}
-          max={FEDERAL_MAX}
-          step={0.5}
-          suffix="%"
-          onChange={(v) =>
-            onChange({ ...inputs, federalTaxRate: v, taxState: CUSTOM_RATES })
-          }
-        />
-        </div>
-
-        <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="taxState" className="text-sm text-muted-foreground">
-            State
-          </Label>
-          <select
-            id="taxState"
-            value={inputs.taxState}
-            onChange={(e) =>
-              // Picking a state derives both rates from the figures entered.
-              // Either slider can still override, which drops back to Custom.
-              onChange(withDerivedRates({ ...inputs, taxState: e.target.value }))
-            }
-            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
-          >
-            <option value="">No state income tax</option>
-            <option value={CUSTOM_RATES}>Rates I set myself</option>
-            {STATE_TAXES.map((st) => (
-              <option key={st.code} value={st.code}>
-                {st.name}
-                {st.note ? ` — ${st.note}` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-        <SliderField
-          id="stateTaxRate"
-          label="State tax rate"
-          value={inputs.stateTaxRate}
-          min={0}
-          max={STATE_MAX}
-          step={0.5}
-          suffix="%"
-          onChange={(v) =>
-            // Hand-editing the rate detaches it from the chosen state rather
-            // than leaving a state named beside a rate it does not have.
-            onChange({ ...inputs, stateTaxRate: v, taxState: CUSTOM_RATES })
-          }
-        />
-        </div>
-        <TaxNote inputs={inputs} />
-        </div>
+        <TaxSettings inputs={inputs} onChange={onChange} />
       </Section>
     </div>
   )

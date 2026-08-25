@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { STATE_TAXES, findState, taxesSocialSecurityAt } from '@/lib/state-tax'
+import {
+  STATE_TAXES,
+  findState,
+  taxesSocialSecurityAt,
+} from '@/lib/state-tax'
+import { DEFAULT_INPUTS, simulate, type PlanInputs } from '@/lib/retirement'
 import {
   ASSUMED_INDEXATION,
   BRACKET_YEAR,
@@ -31,6 +36,54 @@ import {
  * pinning: if the engine stops producing these numbers, the prose beside them
  * is wrong and no one finds out from the arithmetic.
  */
+/**
+ * Tax is always worked out from the brackets now.
+ *
+ * There used to be a second path: a flat levy driven by two rate fields the
+ * user could type into, reached by an option buried in the State list. Nobody
+ * ever used it — nought of a hundred saved plans — and reaching it silently
+ * turned off bracket taxation, capital-gains stacking and per-year Social
+ * Security taxability, on one plan the difference between $158,000 and
+ * $962,000 of lifetime tax. It is gone. These pin that it stays gone.
+ */
+describe('the rate fields are readouts and nothing reads them', () => {
+  const plan = (taxState: string): PlanInputs => ({
+    ...DEFAULT_INPUTS,
+    currentAge: 60,
+    retirementAge: 62,
+    endAge: 85,
+    brokerageBalance: 200_000,
+    balance401k: 900_000,
+    monthlyRetirementSpending: 6_000,
+    taxState,
+    // Absurd on purpose: if either ever bites, a flat path has come back.
+    federalTaxRate: 40,
+    stateTaxRate: 30,
+  })
+
+  it('ignores the rate fields entirely, whatever the state code', () => {
+    const quiet = { ...plan(''), federalTaxRate: 0, stateTaxRate: 0 }
+    expect(simulate(plan('')).totalTaxes).toBeCloseTo(simulate(quiet).totalTaxes, 6)
+  })
+
+  it('charges state tax only where a state was chosen', () => {
+    expect(simulate(plan('')).rows.every((r) => r.stateTax === 0)).toBe(true)
+    expect(simulate(plan('CA')).rows.some((r) => r.stateTax > 0)).toBe(true)
+  })
+
+  it('still charges federal tax with no state chosen', () => {
+    // "No state income tax" means no *state* tax. The brackets still apply.
+    expect(simulate(plan('')).rows.some((r) => r.federalTax > 0)).toBe(true)
+  })
+
+  it('treats an unrecognised state code as no state rather than as flat rates', () => {
+    // Older plans may hold the code the removed option wrote.
+    const legacy = simulate(plan('CUSTOM'))
+    expect(legacy.totalTaxes).toBeCloseTo(simulate(plan('')).totalTaxes, 6)
+  })
+})
+
+
 describe('the derivation the tax tab shows', () => {
   const WITHDRAWAL = 334_641
   const TAXABLE_SS = 36_873

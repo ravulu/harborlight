@@ -14,7 +14,6 @@ import {
 } from '@/lib/irmaa'
 import { benefitFactor, spouseMonthlyBenefit } from '@/lib/social-security'
 import { acaCost, acaMagiOf } from '@/lib/aca'
-import { usesDerivedRates } from '@/lib/state-tax'
 
 export interface PlanInputs {
   currentAge: number
@@ -122,9 +121,17 @@ export interface PlanInputs {
   /** any other monthly income in today's dollars: rental, annuity, part-time */
   otherIncomeMonthly: number
   otherIncomeStartAge: number
-  federalTaxRate: number // effective federal % on portfolio withdrawals
-  stateTaxRate: number // effective state % on portfolio withdrawals
-  taxState: string // two-letter code the rate came from, '' when set by hand
+  /**
+   * What the brackets came to, as a percentage — a readout, not a setting.
+   *
+   * Recomputed by `withDerivedRates` on every edit and on load, and read by
+   * nothing in `simulate`: tax is worked out from the brackets, the state
+   * tables and the account a dollar came from. Kept on the plan so the panel
+   * and the stored record can show the figure without re-deriving it.
+   */
+  federalTaxRate: number
+  stateTaxRate: number
+  taxState: string // two-letter code; '' means no state income tax
   filingStatus: FilingStatus
   /**
    * A Roth conversion schedule: move this much out of the 401(k) and IRA each
@@ -502,8 +509,8 @@ export function toPlanInputs(draft: PlanDraft): PlanInputs | null {
  *   drop but part of the benefit becomes taxable, and the effective rate can
  *   rise even as the withdrawal falls. A single rate across both is wrong in
  *   both. With a state selected the rates come from that state's brackets per
- *   phase, and federal alone where no state is named; only rates set by hand
- *   are taken as given.
+ *   phase, and federal alone where no state is named. Nothing is taken as
+ *   given: the rates on the plan are outputs of this, never inputs to it.
  * - Savings are held as one balance. The brokerage and tax-deferred figures
  *   are summed, and every withdrawal is taxed as ordinary income. In practice
  *   brokerage money is taxed more lightly — only its gains, at capital gains
@@ -567,8 +574,6 @@ export function simulate(inputs: PlanInputs): PlanResult {
     pensionCola,
     otherIncomeMonthly,
     otherIncomeStartAge,
-    federalTaxRate,
-    stateTaxRate,
     taxState,
     filingStatus,
     // Absent on every stored plan, and on every plan the form produces. Only
@@ -622,7 +627,6 @@ export function simulate(inputs: PlanInputs): PlanResult {
   // Rates by age. With a state chosen they come from its brackets for each
   // phase of retirement; otherwise the hand-entered pair applies throughout.
   const guard = (v: number) => Math.min(Math.max(v, 0), 0.95)
-  const flatRate = guard((federalTaxRate + stateTaxRate) / 100)
   // Worked per year rather than per phase: when the COLA differs from
   // inflation the benefit's real value moves every year, so the rate does too.
   // Three pots, because the tax on a dollar depends entirely on which one it
@@ -865,127 +869,49 @@ export function simulate(inputs: PlanInputs): PlanResult {
             : 0
         conversion = Math.min(scheduled, Math.max(0, deferred - rmdThisYear))
 
-        if (usesDerivedRates(taxState)) {
-          // Taxable first, then tax-deferred, then Roth, with the tax on each
-          // worked out from what it actually is: a gain at gains rates, a
-          // 401(k) dollar as ordinary income, a Roth dollar not at all.
-          const draw = withdrawForNeed(
-            shortfall / inflator,
-            socialSecurity / inflator,
-            otherIncome / inflator,
-            taxState,
-            filingStatus,
-            {
-              brokerage: brokerage / inflator,
-              gainShare: brokerageGainShare,
-              deferred: (deferred - conversion) / inflator,
-              // The HSA is untaxed on the way out exactly as the Roth is, so the
-              // tax engine has no reason to tell them apart. They go in as one
-              // pot and the draw is split below — HSA first, because it is the
-              // one earmarked for the medical costs retirement brings, and the
-              // one whose advantage is lost if it is never spent on them.
-              roth: (roth + hsa) / inflator,
-            },
-            {
-              requiredDeferred: rmdThisYear / inflator,
-              earlyPenalty: penalised,
-              age,
-              conversion: conversion / inflator,
-            },
-          )
-          withdrawals = draw.gross * inflator
-          federalTax = draw.federalTax * inflator
-          federalGainsTax = draw.federalGainsTax * inflator
-          earlyPenalty = draw.earlyWithdrawalPenalty * inflator
-          capitalGains = draw.capitalGains * inflator
-          stateTax = draw.stateTax * inflator
-          taxableSocialSecurity = draw.taxableSocialSecurity * inflator
-          taxes = federalTax + stateTax
-          fromBrokerage = draw.fromBrokerage * inflator
-          fromDeferred = draw.fromDeferred * inflator
-          fromRoth = draw.fromRoth * inflator
-          fromHsa = Math.min(fromRoth, hsa)
-          fromRoth -= fromHsa
-          unfunded = draw.unfunded * inflator
-          required = draw.requiredDistribution * inflator
-          surplus = draw.surplus * inflator
-        } else {
-          // A rate set by hand is a levy on withdrawals, so it says nothing
-          // about which pot they came from. Drawn in the same order all the
-          // same, so the balances still move the way they would.
-          //
-          // Capped at what the pots hold, for the same reason the derived
-          // branch is: the grossed-up figure is what the year needed, not what
-          // it could take.
-          const convertible = deferred - conversion
-          const untaxed = roth + hsa
-          const available = brokerage + convertible + untaxed
-          const forced = Math.min(rmdThisYear, convertible)
-          // The conversion is income at the stated rate, and it funds nothing —
-          // so its tax is an extra cost the withdrawal has to carry.
-          const conversionTax = conversion * flatRate
-
-          // The compulsory distribution first, then the conventional order out
-          // of whatever is left of the withdrawal.
-          const split = (gross: number) => {
-            const rest = Math.max(0, gross - forced)
-            const fromB = Math.min(rest, brokerage)
-            const extra = Math.min(rest - fromB, convertible - forced)
-            return {
-              fromB,
-              fromD: forced + extra,
-              fromR: Math.min(rest - fromB - extra, untaxed),
-            }
-          }
-
-          // Solved rather than grossed up in one step. The rate itself is flat,
-          // but the penalty is charged on the deferred part of the draw and the
-          // deferred part depends on how large the draw had to be to carry it.
-          let gross = Math.min(
-            Math.max((shortfall + conversionTax) / (1 - flatRate), forced),
-            available,
-          )
-          for (let i = 0; i < 12; i++) {
-            const penalty = penalised
-              ? split(gross).fromD * EARLY_WITHDRAWAL_PENALTY_RATE
-              : 0
-            const next = Math.min(
-              Math.max((shortfall + conversionTax + penalty) / (1 - flatRate), forced),
-              available,
-            )
-            if (Math.abs(next - gross) < 0.5) break
-            gross = next
-          }
-
-          withdrawals = gross
-          const parts = split(withdrawals)
-          fromBrokerage = parts.fromB
-          fromDeferred = parts.fromD
-          fromRoth = parts.fromR
-          fromHsa = Math.min(fromRoth, hsa)
-          fromRoth -= fromHsa
-          required = forced
-          earlyPenalty = penalised ? fromDeferred * EARLY_WITHDRAWAL_PENALTY_RATE : 0
-          // Charged on the withdrawal rather than inferred from the difference,
-          // so it stays right once the cap has bitten.
-          const levy = withdrawals * flatRate + conversionTax
-          taxes = levy + earlyPenalty
-          // Decided on whether the pots capped the draw, as in the derived
-          // branch: the loop above settles to within fifty cents, and comparing
-          // the two figures directly would read that residue as a failed year.
-          unfunded =
-            withdrawals >= available - 1e-9
-              ? Math.max(0, shortfall - (withdrawals - taxes))
-              : 0
-          surplus = Math.max(0, withdrawals - taxes - shortfall)
-          // A hand-entered rate is one levy split two ways, so the only honest
-          // division is the ratio the two rates were given in. The penalty is
-          // not part of that split — it is federal, whatever the rates say.
-          const rateSum = federalTaxRate + stateTaxRate
-          const federalLevy = rateSum > 0 ? (levy * federalTaxRate) / rateSum : levy
-          federalTax = federalLevy + earlyPenalty
-          stateTax = levy - federalLevy
-        }
+        // Taxable first, then tax-deferred, then Roth, with the tax on each
+        // worked out from what it actually is: a gain at gains rates, a
+        // 401(k) dollar as ordinary income, a Roth dollar not at all.
+        const draw = withdrawForNeed(
+          shortfall / inflator,
+          socialSecurity / inflator,
+          otherIncome / inflator,
+          taxState,
+          filingStatus,
+          {
+            brokerage: brokerage / inflator,
+            gainShare: brokerageGainShare,
+            deferred: (deferred - conversion) / inflator,
+            // The HSA is untaxed on the way out exactly as the Roth is, so the
+            // tax engine has no reason to tell them apart. They go in as one
+            // pot and the draw is split below — HSA first, because it is the
+            // one earmarked for the medical costs retirement brings, and the
+            // one whose advantage is lost if it is never spent on them.
+            roth: (roth + hsa) / inflator,
+          },
+          {
+            requiredDeferred: rmdThisYear / inflator,
+            earlyPenalty: penalised,
+            age,
+            conversion: conversion / inflator,
+          },
+        )
+        withdrawals = draw.gross * inflator
+        federalTax = draw.federalTax * inflator
+        federalGainsTax = draw.federalGainsTax * inflator
+        earlyPenalty = draw.earlyWithdrawalPenalty * inflator
+        capitalGains = draw.capitalGains * inflator
+        stateTax = draw.stateTax * inflator
+        taxableSocialSecurity = draw.taxableSocialSecurity * inflator
+        taxes = federalTax + stateTax
+        fromBrokerage = draw.fromBrokerage * inflator
+        fromDeferred = draw.fromDeferred * inflator
+        fromRoth = draw.fromRoth * inflator
+        fromHsa = Math.min(fromRoth, hsa)
+        fromRoth -= fromHsa
+        unfunded = draw.unfunded * inflator
+        required = draw.requiredDistribution * inflator
+        surplus = draw.surplus * inflator
 
         // Cover is priced off this year's own income, so it can only be known
         // once the year has been solved — and paying for it raises the income

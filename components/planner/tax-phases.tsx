@@ -355,7 +355,7 @@ export function TaxPhases({
                   }`
                 : 'Taxes Social Security, following the federal taxable amount.'
               : 'Does not tax Social Security, so only the withdrawal is exposed to state tax.'
-            : 'No state selected, so the rates you entered by hand apply to every year.'}{' '}
+            : 'No state chosen, so no state income tax is charged. Federal tax is still worked out from the real brackets, year by year, exactly as it is with a state selected — the percentages shown are what that comes to, not a rate being applied.'}{' '}
           {state?.retirementExempt
             ? 'Withdrawals from retirement accounts are exempt too, which is why the state rate is zero.'
             : ''}

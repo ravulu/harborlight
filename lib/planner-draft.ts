@@ -1,15 +1,14 @@
 import { EMPTY_DRAFT, MONEY_FIELDS, toPlanInputs, type PlanDraft } from '@/lib/retirement'
-import { CUSTOM_RATES, findState, usesDerivedRates } from '@/lib/state-tax'
+import { findState } from '@/lib/state-tax'
 import { estimateRates } from '@/lib/tax'
 
 /**
- * Rates that follow the chosen state rather than the user are a function of
- * the plan, so they are recomputed rather than trusted: on every edit, and on
- * load, since a stored rate can be older than the brackets or than the plan
- * it was derived from. Rates the user set by hand are left alone.
+ * The rates are a function of the plan, so they are recomputed rather than
+ * trusted: on every edit, and on load, since a stored rate can be older than
+ * the brackets or than the plan it was derived from. There is no longer a way
+ * to set them by hand, so there is nothing here to leave alone.
  */
 export function withDerivedRates(draft: PlanDraft): PlanDraft {
-  if (!usesDerivedRates(draft.taxState)) return draft
   const complete = toPlanInputs(draft)
   if (!complete) return draft
   const est = estimateRates(complete, draft.taxState, draft.filingStatus)
@@ -27,10 +26,12 @@ export const DRAFT_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
 /**
  * Bumped when a stored field changes meaning rather than shape.
  *
- * Version 2 redefined an empty taxState. It used to mark rates the user had
- * set by hand; it now means no state income tax, with the federal rate
- * derived. Without the marker an older draft would keep its hand-set rates on
- * load and then lose them to the first edit.
+ * Version 2 redefined an empty taxState, which used to mark rates the user had
+ * set by hand. Nothing reads the version any more: hand-set rates are gone
+ * entirely, so both meanings of an empty code now lead to the same place and
+ * there is nothing for a loader to tell apart. Still written, so a future
+ * change that does need to distinguish old drafts from new ones has a marker
+ * to work from.
  */
 export const DRAFT_VERSION = 2
 
@@ -65,17 +66,12 @@ export function parseDraftCookie(raw: string | undefined): StoredDraft | null {
       // status — and since the draft is what gets saved, dropped them from
       // the stored plan too.
       if (key === 'taxState') {
-        const valid =
-          typeof value === 'string' &&
-          (value === '' || value === CUSTOM_RATES || findState(value))
-        const code = valid ? (value as string) : ''
-        // Before version 2 an empty code meant hand-set rates, so honour that
-        // rather than deriving over figures the user chose.
-        // Pinned to the version that introduced the change rather than to
-        // DRAFT_VERSION, so bumping the version for something unrelated
-        // cannot silently re-apply this to drafts that already have the new
-        // meaning.
-        draft.taxState = code === '' && (parsed.v ?? 1) < 2 ? CUSTOM_RATES : code
+        // Anything unrecognised — including the 'CUSTOM' code older drafts
+        // may still carry — reads as no state income tax. The rates are
+        // derived either way now, so there is nothing to preserve.
+        const code =
+          typeof value === 'string' && findState(value) ? (value as string) : ''
+        draft.taxState = code
       } else if (key === 'filingStatus') {
         draft.filingStatus = value === 'married' ? 'married' : 'single'
       } else if (typeof value === 'number' && Number.isFinite(value)) {

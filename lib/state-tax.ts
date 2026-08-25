@@ -129,14 +129,9 @@ export const STATE_TAXES: StateTax[] = [
 ]
 
 /**
- * Marks rates the user set by hand. Distinct from '' — an empty code means no
- * state income tax, which still has a federal rate worth deriving.
+ * An unrecognised code, including the 'CUSTOM' one older plans may hold, means
+ * no state income tax. Rates are always derived; there is no second path.
  */
-export const CUSTOM_RATES = 'CUSTOM'
-
-/** Whether the rates should be worked out from brackets rather than left alone. */
-export const usesDerivedRates = (taxState: string) => taxState !== CUSTOM_RATES
-
 export const findState = (code: string) => STATE_TAXES.find((s) => s.code === code)
 
 /** The schedule to use for a filing status, falling back to single. */
