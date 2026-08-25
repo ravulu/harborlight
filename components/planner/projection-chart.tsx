@@ -93,6 +93,66 @@ function ProjectionTooltip({
  * middle 80%, the line is the median. A single line would imply the future is
  * known, which is the thing a simulation exists to deny.
  */
+/**
+ * Chart geometry, named because the retirement label needs it too.
+ *
+ * The label is centred on the marker, and the marker clamps to the first year
+ * on the chart when a plan is already retired — so without knowing where the
+ * plot starts, the pill would hang off the left edge over the y-axis figures.
+ */
+const CHART_MARGIN = { left: 4, right: 8, top: 16, bottom: 0 }
+const Y_AXIS_WIDTH = 48
+const PLOT_LEFT = CHART_MARGIN.left + Y_AXIS_WIDTH
+
+/**
+ * The marker that says where saving stops and drawing down starts.
+ *
+ * A filled pill carrying both the event and the age, sat on top of the line
+ * rather than floating at the top of the plot. It used to be the bare word
+ * "Retire" positioned `insideTopRight`, which put it level with the highest
+ * y-axis figure while its dashes began well below — so it read as part of the
+ * axis, and never said which age it meant. Every other label on this chart is
+ * a quantity; this makes the marker one too.
+ */
+function RetireMarker({
+  viewBox,
+  age,
+}: {
+  viewBox?: { x?: number; y?: number }
+  age: number
+}) {
+  if (!viewBox || viewBox.x === undefined || viewBox.y === undefined) return null
+  const text = `Retire at ${age}`
+  // Estimated rather than measured: the string is always "Retire at" plus two
+  // digits, so one constant per character is stable enough and avoids a
+  // layout pass just to size a pill.
+  const width = text.length * 6.1 + 18
+  const cx = Math.max(viewBox.x, PLOT_LEFT + width / 2)
+
+  return (
+    <g aria-hidden>
+      <rect
+        x={cx - width / 2}
+        y={viewBox.y - 9}
+        width={width}
+        height={19}
+        rx={9.5}
+        fill="var(--primary)"
+      />
+      <text
+        x={cx}
+        y={viewBox.y + 4.5}
+        textAnchor="middle"
+        fontSize={11}
+        fontWeight={600}
+        fill="var(--primary-foreground)"
+      >
+        {text}
+      </text>
+    </g>
+  )
+}
+
 export function ProjectionChart({
   monteCarlo,
   retirementAge,
@@ -126,7 +186,7 @@ export function ProjectionChart({
 
   return (
     <ChartContainer config={config} className="aspect-auto h-[320px] w-full">
-      <AreaChart data={data} margin={{ left: 4, right: 8, top: 8, bottom: 0 }}>
+      <AreaChart data={data} margin={CHART_MARGIN}>
         <defs>
           <linearGradient id="fillBand" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor="var(--color-band)" stopOpacity={0.35} />
@@ -144,7 +204,7 @@ export function ProjectionChart({
         <YAxis
           tickLine={false}
           axisLine={false}
-          width={48}
+          width={Y_AXIS_WIDTH}
           tickFormatter={(v) => formatCurrency(v, { compact: true })}
         />
         <ChartTooltip
@@ -156,12 +216,7 @@ export function ProjectionChart({
           x={retirementAge}
           stroke="var(--muted-foreground)"
           strokeDasharray="4 4"
-          label={{
-            value: 'Retire',
-            position: 'insideTopRight',
-            fill: 'var(--muted-foreground)',
-            fontSize: 11,
-          }}
+          label={<RetireMarker age={retirementAge} />}
         />
         <Area
           type="monotone"

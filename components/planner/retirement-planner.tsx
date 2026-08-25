@@ -41,14 +41,34 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildInsights } from '@/lib/insights'
 import { INSIGHTS_ID } from '@/components/planner/insights-link'
 import { MEDICARE_AGE, NATIONAL_AVERAGE_NOTE } from '@/lib/aca'
-import { tabPath } from '@/lib/planner-tabs'
+import { PLANNER_TABS, tabPath, type PlannerTab } from '@/lib/planner-tabs'
+
+/**
+ * Kept here rather than on the tab list itself: that module is read by a
+ * server action, and dragging an icon library into it for the sake of four
+ * glyphs would put lucide in the server bundle.
+ */
+const TAB_ICONS: Record<PlannerTab, typeof TrendingUp> = {
+  balance: TrendingUp,
+  income: Wallet,
+  tax: Receipt,
+  table: Table2,
+}
 import { WhatsStillOpen } from '@/components/planner/whats-still-open'
 import { SpendingLever } from '@/components/planner/spending-lever'
 import { spendingLeverage } from '@/lib/spending-lever'
 import { compareConversions, type ConversionComparison } from '@/lib/conversions'
 import { record } from '@/lib/usage'
 import { earliestRetirement } from '@/lib/earliest'
-import { Save, Check, CopyPlus } from 'lucide-react'
+import {
+  Save,
+  Check,
+  CopyPlus,
+  TrendingUp,
+  Wallet,
+  Receipt,
+  Table2,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSettled } from '@/lib/use-settled'
 
@@ -354,9 +374,10 @@ export function RetirementPlanner({
             <h2 className="font-serif text-xl font-medium text-foreground">
               Your projection
             </h2>
-            <p className="text-sm text-muted-foreground">
-              Balance, where the money comes from, and what tax takes — all in
-              today&apos;s money.
+            <p className="text-sm text-muted-foreground text-pretty">
+              Four views of the same plan, all in today&apos;s money. The chart
+              is one of them — the other three show where the money comes from,
+              what tax takes, and every year in full.
             </p>
           </div>
           {monteCarlo && inputs && (
@@ -382,11 +403,55 @@ export function RetirementPlanner({
               }
             }}
           >
-            <TabsList>
-              <TabsTrigger value="balance">Balance</TabsTrigger>
-              <TabsTrigger value="income">Income</TabsTrigger>
-              <TabsTrigger value="tax">Tax</TabsTrigger>
-              <TabsTrigger value="table">Yearly detail</TabsTrigger>
+            {/* Rendered from the shared list rather than written out, so the
+                labels here and the ones the admin reports cannot drift.
+
+                Full width and taller than the default: at `w-fit` and `h-8`
+                these sat in the corner looking like a chip, and people read
+                past them. Four equal targets spanning the card read as
+                navigation, which is what they are. */}
+            <TabsList className="h-auto w-full gap-2 bg-transparent p-0">
+              {PLANNER_TABS.map((t) => {
+                const Icon = TAB_ICONS[t.value]
+                return (
+                  <TabsTrigger
+                    key={t.value}
+                    value={t.value}
+                    className={cn(
+                      // A button you can see the edge of, with a rule under it
+                      // that fills in as you arrive. The default variant swaps
+                      // a background on the active tab and leaves the other
+                      // three as bare text, which is what made a row of four
+                      // read as a caption rather than as somewhere to go.
+                      'h-auto flex-col items-center gap-0.5 rounded-lg border',
+                      'border-b-[3px] border-border border-b-transparent bg-card',
+                      'px-2 py-2.5 text-foreground/80 transition-colors',
+                      // The invitation: hovering colours the rule in before
+                      // anything is clicked, so the affordance is discovered
+                      // by moving the mouse rather than by reading.
+                      'hover:border-primary/40 hover:border-b-primary/50 hover:bg-accent/30 hover:text-foreground',
+                      'data-active:border-primary/50 data-active:border-b-primary data-active:bg-accent/50 data-active:text-foreground data-active:shadow-sm',
+                      // Stated for dark too. The base sets `dark:data-active:*`
+                      // separately, which tailwind-merge cannot fold into the
+                      // light rules above — left alone, the active tab would
+                      // lose its accent and its border in dark mode only.
+                      'dark:data-active:border-primary/50 dark:data-active:border-b-primary dark:data-active:bg-accent/60',
+                      'sm:flex-row sm:gap-2 sm:px-3',
+                    )}
+                  >
+                    <Icon className="size-4 shrink-0" />
+                    <span className="flex flex-col items-center sm:items-start">
+                      <span className="text-xs sm:text-sm">{t.label}</span>
+                      {/* The question it settles, which the noun alone does
+                          not convey. Hidden on the narrowest screens, where
+                          four columns have no room for a second line. */}
+                      <span className="hidden text-[11px] font-normal text-muted-foreground lg:block">
+                        {t.hint}
+                      </span>
+                    </span>
+                  </TabsTrigger>
+                )
+              })}
             </TabsList>
             <TabsContent value="balance" className="pt-4">
               {monteCarlo && (

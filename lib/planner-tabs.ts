@@ -8,15 +8,36 @@
  * to Yearly detail, and an instruction naming a tab that does not exist is
  * worse than no instruction.
  *
+ * The hint is what the tab answers, not what it contains. Four abstract nouns
+ * in a row read as decoration and get ignored — people opened the projection
+ * and never touched three quarters of it — so each one says what question it
+ * settles instead.
+ *
  * The value is also what gets recorded, as a fragment on the path — a tab is a
  * place within a page, which is what a fragment is for, and it keeps the event
  * vocabulary a fixed list of names rather than one name per tab.
  */
 export const PLANNER_TABS = [
-  { value: 'balance', label: 'Balance' },
-  { value: 'income', label: 'Income' },
-  { value: 'tax', label: 'Tax' },
-  { value: 'table', label: 'Yearly detail' },
+  {
+    value: 'balance',
+    label: 'Balance',
+    hint: 'what you will have',
+  },
+  {
+    value: 'income',
+    label: 'Income',
+    hint: 'where it comes from',
+  },
+  {
+    value: 'tax',
+    label: 'Tax',
+    hint: 'what it costs you',
+  },
+  {
+    value: 'table',
+    label: 'Yearly detail',
+    hint: 'every year, in full',
+  },
 ] as const
 
 export type PlannerTab = (typeof PLANNER_TABS)[number]['value']
