@@ -3,6 +3,8 @@
 import { db } from '@/lib/db'
 import { retirementPlans, user, feedback, events } from '@/lib/db/schema'
 import { and, countDistinct, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm'
+
+import { tabLabel } from '@/lib/planner-tabs'
 import { requireAdmin } from '@/lib/admin'
 
 const LIMIT = 200
@@ -186,6 +188,14 @@ export interface UsageSummary {
   /** Roughly where visits came from. Country only — no address is stored. */
   places: { country: string; region: string; city: string; visits: number }[]
   /**
+   * Which result tabs got opened, most-opened first.
+   *
+   * Only deliberate switches: the first tab is shown without a click, so
+   * counting it would report an interest nobody expressed. A tab missing from
+   * this list was never switched to, which is the finding.
+   */
+  tabs: { label: string; visits: number }[]
+  /**
    * The last few visits, each with what it did, in order.
    *
    * Grouped by session rather than by person, because a person is not
@@ -305,6 +315,16 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
     .orderBy(desc(countDistinct(events.session)))
     .limit(12)
 
+  const tabRows = await db
+    .select({ path: events.path, visits: countDistinct(events.session) })
+    .from(events)
+    .where(and(window, eq(events.name, 'tab_viewed')))
+    .groupBy(events.path)
+
+  const tabs = tabRows
+    .map((r) => ({ label: tabLabel(r.path), visits: r.visits }))
+    .sort((a, b) => b.visits - a.visits)
+
   // The most recent visits first, then everything each of them did. Two
   // queries rather than one: a limit on events would cut a visit in half and
   // show a visit that landed but apparently never left the page.
@@ -361,6 +381,7 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
     referrers,
     pages,
     places,
+    tabs,
     recentSessions,
   }
 }

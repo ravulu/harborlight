@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { adminDay, adminTimeOnly, adminZoneLabel } from '@/lib/time'
+import { PLANNER_TABS } from '@/lib/planner-tabs'
 
 function isoDay(d: Date) {
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -226,12 +227,74 @@ export function Usage() {
             </div>
           )}
 
+          <Tabs tabs={data.tabs} of={data.steps.find((s) => s.name === 'plan_completed')?.visits ?? 0} />
+
           {data.recentSessions.length > 0 && (
             <Visits sessions={data.recentSessions} />
           )}
         </div>
       )}
     </Card>
+  )
+}
+
+/**
+ * Which of the result tabs anybody opened, out of those who saw a projection.
+ *
+ * Measured against the projection rather than against all visits, because a
+ * tab cannot be opened by someone who never got one — dividing by everybody
+ * would report the funnel again under a different name.
+ *
+ * Every tab is listed, including the ones nobody opened. A tab absent from a
+ * chart reads as an oversight; a tab showing zero reads as an answer, and it
+ * is the more useful of the two.
+ */
+function Tabs({
+  tabs,
+  of,
+}: {
+  tabs: UsageSummary['tabs']
+  of: number
+}) {
+  const seen = new Map(tabs.map((t) => [t.label, t.visits]))
+  const rows = PLANNER_TABS.map((t) => ({
+    label: t.label,
+    visits: seen.get(t.label) ?? 0,
+  }))
+  const most = Math.max(1, ...rows.map((r) => r.visits))
+
+  return (
+    <div className="border-t border-border pt-4">
+      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        Tabs opened{' '}
+        <span className="normal-case tracking-normal text-muted-foreground/70">
+          · of {of.toLocaleString()} who saw a projection, switches only
+        </span>
+      </p>
+
+      <ul className="mt-2 flex flex-col gap-1.5">
+        {rows.map((r) => (
+          <li key={r.label} className="flex items-center gap-3 text-sm">
+            <span className="w-28 shrink-0 text-foreground">{r.label}</span>
+            <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+              <span
+                className="block h-full rounded-full bg-primary/70"
+                style={{ width: `${(r.visits / most) * 100}%` }}
+              />
+            </span>
+            <span className="w-10 shrink-0 text-right tabular-nums text-muted-foreground">
+              {r.visits.toLocaleString()}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {/* The first tab is shown without a click, so a low count against it
+          means people stayed on it rather than that they avoided it. */}
+      <p className="mt-1.5 text-[11px] text-muted-foreground/70 text-pretty">
+        Balance is the tab that opens by default, so its count is people who
+        went away and came back — not people who saw it.
+      </p>
+    </div>
   )
 }
 

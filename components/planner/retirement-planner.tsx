@@ -41,6 +41,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildInsights } from '@/lib/insights'
 import { INSIGHTS_ID } from '@/components/planner/insights-link'
 import { MEDICARE_AGE, NATIONAL_AVERAGE_NOTE } from '@/lib/aca'
+import { tabPath } from '@/lib/planner-tabs'
 import { WhatsStillOpen } from '@/components/planner/whats-still-open'
 import { SpendingLever } from '@/components/planner/spending-lever'
 import { spendingLeverage } from '@/lib/spending-lever'
@@ -364,7 +365,23 @@ export function RetirementPlanner({
         </div>
 
         {inputs && result ? (
-          <Tabs defaultValue="balance">
+          <Tabs
+            defaultValue="balance"
+            onValueChange={(value) => {
+              /**
+               * Only a deliberate switch is recorded.
+               *
+               * The first tab is shown without anybody clicking it, so
+               * counting that would report an interest nobody expressed and
+               * would swamp the other three. Once per tab per visit, because
+               * flipping back and forth is one act of reading rather than
+               * several.
+               */
+              if (typeof value === 'string') {
+                record('tab_viewed', tabPath(value), true)
+              }
+            }}
+          >
             <TabsList>
               <TabsTrigger value="balance">Balance</TabsTrigger>
               <TabsTrigger value="income">Income</TabsTrigger>
