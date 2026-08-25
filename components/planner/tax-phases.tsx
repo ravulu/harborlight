@@ -14,6 +14,7 @@ import {
 } from '@/lib/tax'
 import { findState, FILING_STATUSES, type FilingStatus } from '@/lib/state-tax'
 import type { ConversionComparison } from '@/lib/conversions'
+import { InsightsLink } from '@/components/planner/insights-link'
 import { CLIFF, MEDICARE_AGE, povertyLine } from '@/lib/aca'
 import { cn } from '@/lib/utils'
 
@@ -350,6 +351,21 @@ export function TaxPhases({
             which is the bigger number on this page, is not affected.
           </p>
         )}
+
+        {/* These notes are the rules. What the rules come to on this
+            particular plan is written against the reader's own figures in a
+            different card, and someone who reads to the bottom of this box has
+            no way to know that. */}
+        <p className="border-t border-border/60 pt-2 text-justify hyphens-auto">
+          <span className="font-medium text-foreground">
+            What this comes to on your plan.
+          </span>{' '}
+          Everything above is the rules. Why your figures land where they do —
+          where the Medicare surcharge starts and why it totals what it does,
+          what the forced withdrawals do to your later years, which of these
+          you can still change — is worked out against your own numbers in{' '}
+          <InsightsLink />, the card below this one.
+        </p>
       </div>
     </div>
   )
@@ -797,6 +813,9 @@ function RothConversions({
             figure is what that costs{' '}
             <span className="font-medium text-foreground">in a year</span> it is
             charged; underneath is the whole of it, and how many years that is.
+            Why your plan comes to that total — which year it starts, and how
+            much of it is a long-run assumption about premium growth rather
+            than your own income — is set out in <InsightsLink />.
           </Column>
           {c.beforeMedicare && (
             <Column name="ACA premiums">
@@ -827,6 +846,15 @@ function RothConversions({
             it.
           </Column>
         </dl>
+        {/* The glossary says what a column is. It does not say why a column
+            comes to the number it does on this plan — that is written against
+            the reader's own figures further down, and someone who never
+            scrolls past the table has no way to know it exists. */}
+        <p className="border-t border-border/60 pt-2 text-muted-foreground text-justify hyphens-auto">
+          That is what the columns are. Why they come to these particular
+          figures on your plan is taken apart in <InsightsLink />, further down
+          this page.
+        </p>
       </div>
 
       <ul className="flex flex-col gap-2">

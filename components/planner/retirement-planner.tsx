@@ -39,6 +39,8 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { buildInsights } from '@/lib/insights'
+import { INSIGHTS_ID } from '@/components/planner/insights-link'
+import { WhatsStillOpen } from '@/components/planner/whats-still-open'
 import { compareConversions, type ConversionComparison } from '@/lib/conversions'
 import { record } from '@/lib/usage'
 import { earliestRetirement } from '@/lib/earliest'
@@ -398,6 +400,10 @@ export function RetirementPlanner({
             conversions={conversions}
           />
         )}
+
+        {/* Below the insights, because a deadline is only interesting once you
+            know why the thing it applies to matters. */}
+        {inputs && result && <WhatsStillOpen inputs={inputs} result={result} />}
       </div>
     </div>
   )
@@ -428,7 +434,10 @@ function Insights({
   if (insights.length === 0) return null
 
   return (
-    <Card className="p-6 gap-4">
+    /* Named so the tax tab can link straight here. `scroll-mt` clears the
+       sticky header, which is h-16 — without it the browser scrolls the
+       heading to y=0 and the header sits on top of it. */
+    <Card id={INSIGHTS_ID} className="p-6 gap-4 scroll-mt-20">
       <div className="flex flex-col gap-1">
         <h2 className="font-serif text-xl font-medium text-foreground">
           Worth looking at

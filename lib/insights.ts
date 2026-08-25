@@ -5,6 +5,8 @@ import { benefitFactor, MAX_CLAIM_AGE } from '@/lib/social-security'
 import { TARGET_CONFIDENCE } from '@/lib/suggestions'
 import { rmdAge } from '@/lib/rmd'
 import {
+  ASSUMED_PREMIUM_GROWTH,
+  IRMAA_YEAR,
   LOOKBACK_YEARS,
   MEDICARE_AGE,
   irmaaTierFor,
@@ -205,6 +207,22 @@ export function buildInsights(
     const cause = result.rows.find((r) => r.age === causeAge)
     const worst = surcharged.reduce((a, r) => (r.irmaaSurcharge > a.irmaaSurcharge ? r : a))
 
+    // Why a late year costs so much more than the same income would today.
+    //
+    // Every figure on the page is in today's money, but the surcharge is the
+    // one line grown faster than the inflation that deflates it — so it rises
+    // in real terms, and over a long plan the gap compounds into most of the
+    // total. A reader who is not told this reasonably assumes the number is
+    // today's rates repeated, and it is not.
+    const infl = inputs.inflationRate / 100
+    const realMultiple = Math.pow(
+      (1 + ASSUMED_PREMIUM_GROWTH) / (1 + infl),
+      Math.max(0, worst.year - IRMAA_YEAR),
+    )
+    // Below this the effect is not worth a paragraph, and on a short plan it
+    // barely exists. Said only where it is actually driving the figure.
+    const premiumsOutpace = realMultiple >= 1.5
+
     out.push({
       key: 'irmaa',
       priority: 32,
@@ -224,7 +242,26 @@ export function buildInsights(
         `${inputs.filingStatus === 'married' ? ', counting both of you, since it is charged per person' : ''}. ` +
         `It is a premium rather than a tax, so it is not in the tax figures above — it is spending, ` +
         `and the withdrawals have been raised to cover it. The two-year lag is what makes it awkward: ` +
-        `by the time the bill lands, the year that caused it is closed.`,
+        `by the time the bill lands, the year that caused it is closed.` +
+        `${
+          surcharged.length > 1
+            ? ` The ${money(result.totalIrmaa)} is ${surcharged.length} years of this, not one bill — ` +
+              `${money(result.totalIrmaa / surcharged.length)} a year on average.`
+            : ''
+        }` +
+        `${
+          premiumsOutpace
+            ? ` Part of what drives the figure: the surcharge is the only number here ` +
+              `assumed to rise faster than prices. Medicare premiums are grown at ` +
+              `${Math.round(ASSUMED_PREMIUM_GROWTH * 100)}% a year against ` +
+              `${inputs.inflationRate}% inflation, because Part B has outrun the cost of living for most ` +
+              `of the past decade. Everything on this page is in today's money, so that gap shows up as ` +
+              `real growth: by ${worst.age} the plan is charged roughly ` +
+              `${realMultiple.toFixed(1)}× what the same income costs a household today. That is the ` +
+              `cautious end of a long-run assumption rather than a forecast — the further out the year, ` +
+              `the more of the figure is the assumption and the less is your income.`
+            : ''
+        }`,
     })
   } else if (medicareYears.length > 0) {
     // No surcharge — but the thresholds are cliffs, so how close this plan

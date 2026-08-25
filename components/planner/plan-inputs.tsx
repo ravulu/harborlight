@@ -26,6 +26,7 @@ import { ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ExpenseEstimator } from './expense-estimator'
 import { Field, InfoTip } from './info-tip'
+import { useWindowReturn } from '@/lib/use-window-return'
 import { rmdAge } from '@/lib/insights'
 import {
   clamp,
@@ -76,6 +77,10 @@ function ValueInput({
 }) {
   // Non-null only while the field is being edited.
   const [text, setText] = useState<string | null>(null)
+  // Skips the emptying when the browser is handing the window back rather
+  // than someone choosing the field — otherwise a part-typed figure vanishes
+  // on returning from another app.
+  const returning = useWindowReturn()
   const editing = text !== null
 
   return (
@@ -84,7 +89,10 @@ function ValueInput({
       inputMode="decimal"
       aria-label={`${label} value`}
       value={editing ? text : `${value}${suffix ?? ''}`}
-      onFocus={() => setText('')}
+      onFocus={() => {
+            if (returning()) return
+            setText('')
+          }}
       onClick={() => setText('')}
       onChange={(e) => {
         // The unit is added back on blur, so only the number is kept here.
@@ -177,12 +185,19 @@ function ClearingInput({
   onValueChange: (next: string) => void
 }) {
   const [text, setText] = useState<string | null>(null)
+  // Skips the emptying when the browser is handing the window back rather
+  // than someone choosing the field — otherwise a part-typed figure vanishes
+  // on returning from another app.
+  const returning = useWindowReturn()
 
   return (
     <Input
       {...props}
       value={text ?? value}
-      onFocus={() => setText('')}
+      onFocus={() => {
+            if (returning()) return
+            setText('')
+          }}
       onClick={() => setText('')}
       onChange={(e) => {
         setText(e.target.value)
@@ -226,6 +241,10 @@ function NumberField({
   // merge the typing into it — 2,000 becoming 20,000 or 02,000 depending on
   // which side of it the caret landed.
   const [text, setText] = useState<string | null>(null)
+  // Skips the emptying when the browser is handing the window back rather
+  // than someone choosing the field — otherwise a part-typed figure vanishes
+  // on returning from another app.
+  const returning = useWindowReturn()
   const shown = text ?? (value === null ? '' : withThousands(String(value)))
 
   return (
@@ -275,7 +294,10 @@ function NumberField({
               el.setSelectionRange(pos, pos)
             })
           }}
-          onFocus={() => setText('')}
+          onFocus={() => {
+            if (returning()) return
+            setText('')
+          }}
           // Also on click, not only on focus: clicking a field that already
           // has focus does not re-fire it, so correcting a figure you just
           // typed would insert into it instead of replacing it. The cost is

@@ -6,6 +6,7 @@ import { ArrowRight, CalendarClock, Coins, PiggyBank, TrendingUp } from 'lucide-
 
 import { DEFAULT_INPUTS, formatCurrency } from '@/lib/retirement'
 import { useSettled } from '@/lib/use-settled'
+import { useWindowReturn } from '@/lib/use-window-return'
 import {
   caretAfter,
   clamp,
@@ -76,6 +77,10 @@ function Field({
   // Held while editing so a part-typed entry survives reformatting; cleared on
   // blur so the box falls back to the canonical value.
   const [text, setText] = useState<string | null>(null)
+  // Skips the emptying when the browser is handing the window back rather
+  // than someone choosing the field — otherwise a part-typed figure vanishes
+  // on returning from another app.
+  const returning = useWindowReturn()
   const shown =
     text ?? (value === null || !Number.isFinite(value) ? '' : withThousands(String(value)))
 
@@ -122,7 +127,10 @@ function Field({
               el.setSelectionRange(pos, pos)
             })
           }}
-          onFocus={() => setText('')}
+          onFocus={() => {
+            if (returning()) return
+            setText('')
+          }}
           // Also on click: clicking a box that already has focus does not
           // re-fire focus, so correcting a figure you just typed would insert
           // into it rather than replace it.

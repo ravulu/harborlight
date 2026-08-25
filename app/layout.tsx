@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     template: `%s — ${SITE.name}`,
   },
   description:
-    'Free retirement calculator. Project your savings, model your spending, and see how long your money lasts — with taxes, Social Security and inflation included.',
+    'Free retirement calculator. Project your savings, see how long your money lasts, and find the decisions still open to you — taxes and Social Security included.',
   keywords: KEYWORDS_UNIQUE,
   applicationName: SITE.name,
   authors: [{ name: SITE.publisher }],
@@ -40,14 +40,14 @@ export const metadata: Metadata = {
     url: SITE.url,
     title: 'Harborlight — Retirement Calculator & Planning',
     description:
-      'Project your savings, model your spending, and see how long your money lasts.',
+      'Project your savings, see how long your money lasts, and find the decisions still open to you.',
     images: [{ url: '/hero-coast.png', width: 1200, height: 630, alt: 'Harborlight retirement planner' }],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Harborlight — Retirement Calculator & Planning',
     description:
-      'Project your savings, model your spending, and see how long your money lasts.',
+      'Project your savings, see how long your money lasts, and find the decisions still open to you.',
     images: ['/hero-coast.png'],
   },
 }

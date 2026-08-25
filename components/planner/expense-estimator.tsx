@@ -11,6 +11,7 @@ import {
   writeExpenses,
   type ExpenseCategory,
 } from '@/lib/expenses'
+import { useWindowReturn } from '@/lib/use-window-return'
 import { cn } from '@/lib/utils'
 import { formatCurrency } from '@/lib/retirement'
 import {
@@ -53,6 +54,10 @@ function AmountInput({
   label: string
 }) {
   const [text, setText] = useState<string | null>(null)
+  // Skips the emptying when the browser is handing the window back rather
+  // than someone choosing the field — otherwise a part-typed figure vanishes
+  // on returning from another app.
+  const returning = useWindowReturn()
 
   return (
     <div className="relative w-28 shrink-0">
@@ -84,7 +89,10 @@ function AmountInput({
             el.setSelectionRange(pos, pos)
           })
         }}
-        onFocus={() => setText('')}
+        onFocus={() => {
+            if (returning()) return
+            setText('')
+          }}
         onClick={() => setText('')}
         onBlur={() => setText(null)}
         className="h-9 pl-6 text-right tabular-nums"

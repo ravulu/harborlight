@@ -13,8 +13,10 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = pageMetadata({
   title: 'Harborlight — Retirement Calculator & Planning',
+  // Keyword first, because that is what a search snippet is read for — but
+  // the clause after the dash is the part no other calculator can claim.
   description:
-    'Free retirement calculator. See when you can retire, how long your savings last, and what taxes and Social Security do to the answer.',
+    'Free retirement calculator. See when you can retire, how long your savings last, and which decisions are still open to you — with the date each one closes.',
   path: '/',
 })
 
@@ -79,7 +81,7 @@ export default async function HomePage() {
             <p className="max-w-md text-lg text-muted-foreground text-pretty">
               {isAuthed
                 ? 'Pick up where you left off — your plans are saved and waiting. Open one to carry on, or start another and compare the two.'
-                : 'A free retirement calculator that turns your savings, contributions and spending into a year-by-year projection — so you can answer when can I retire, and how long will my money last, with arithmetic rather than guesswork.'}
+                : 'A free retirement calculator that does more than project. It answers when you can retire and how long your money lasts — then prices the decisions in front of you: when to claim, what to convert, what Medicare charges for it, and when each one stops being available.'}
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <Link
