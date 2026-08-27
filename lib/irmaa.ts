@@ -76,8 +76,65 @@ export const ASSUMED_INDEXATION = 0.025
  * shops. It has risen well ahead of CPI for most of the past decade. Indexing
  * the surcharges at the same rate as the thresholds would understate them
  * every year, and understating a cost is the wrong way to be wrong.
+ *
+ * This is the rate for the years just ahead, not for every year — see
+ * `PREMIUM_EXCESS_FADES_BY`.
  */
 export const ASSUMED_PREMIUM_GROWTH = 0.06
+
+/**
+ * How long the surcharges are assumed to keep outrunning the thresholds.
+ *
+ * The rate above is sound for a decade and indefensible for six. Compounded
+ * flat, 3.5 points a year over inflation for 59 years makes Medicare premiums
+ * about seven times more expensive relative to everything else a household
+ * buys, which no actuarial projection assumes; on one long plan it produced a
+ * lifetime IRMAA of $839,821, of which $702,349 — 84% — was this assumption
+ * rather than the household's income. A figure that is mostly its own
+ * assumption is not a projection of anything.
+ *
+ * So the excess over the threshold indexation fades to nothing across twenty
+ * years, and from then on the surcharge simply tracks the thresholds: the
+ * premium keeps rising with prices, and stops rising *against* them. What
+ * survives is a permanently higher real cost — the fade leaves the surcharge
+ * around 1.4x today's in real terms — rather than one that compounds forever.
+ *
+ * Twenty years is a judgement, not a published figure, and it is the number to
+ * change if a better one turns up. The shape is the part that matters: the
+ * near years, where most households are, are charged at the observed rate, and
+ * the far years, where nobody can defend it, are not.
+ */
+export const PREMIUM_EXCESS_FADES_BY = 20
+
+/**
+ * The rate the surcharges grow at, `years` after the last real table.
+ *
+ * Starts at the observed rate and slides to the threshold indexation, so the
+ * two curves become parallel rather than diverging. Never below indexation:
+ * the surcharges falling in real terms is not a thing this is willing to
+ * assume, and it would understate the cost.
+ */
+export function premiumGrowthIn(years: number): number {
+  const excess = ASSUMED_PREMIUM_GROWTH - ASSUMED_INDEXATION
+  const remaining = Math.max(0, 1 - Math.max(0, years) / PREMIUM_EXCESS_FADES_BY)
+  return ASSUMED_INDEXATION + excess * remaining
+}
+
+/**
+ * What a dollar of surcharge in the base year is assumed to become `years`
+ * later.
+ *
+ * A product rather than a power, because the rate is no longer the same every
+ * year. Bounded by the plan's own horizon — sixty iterations at the very
+ * outside — and called often enough to be worth not making clever.
+ */
+export function premiumMultiple(years: number): number {
+  let multiple = 1
+  for (let y = 0; y < Math.floor(Math.max(0, years)); y++) {
+    multiple *= 1 + premiumGrowthIn(y)
+  }
+  return multiple
+}
 
 /** Published thresholds land on round numbers; projected ones should too. */
 const THRESHOLD_STEP = 1_000
@@ -184,13 +241,15 @@ export const IRMAA_YEARS = Object.keys(IRMAA_TABLES)
  * A table rolled forward to a later year.
  *
  * Thresholds and surcharges move at different rates and are indexed
- * separately — see `ASSUMED_PREMIUM_GROWTH`. The shape is untouched: the same
- * six tiers, in the same statutory proportions.
+ * separately — see `ASSUMED_PREMIUM_GROWTH` and `PREMIUM_EXCESS_FADES_BY`, the
+ * second of which is why the surcharge multiple is a product and the threshold
+ * one is a power. The shape is untouched: the same six tiers, in the same
+ * statutory proportions.
  */
 function projectTable(base: IrmaaTable, toYear: number): IrmaaTable {
   const years = toYear - base.year
   const income = Math.pow(1 + ASSUMED_INDEXATION, years)
-  const premium = Math.pow(1 + ASSUMED_PREMIUM_GROWTH, years)
+  const premium = premiumMultiple(years)
   const roll = (tiers: IrmaaTier[]) =>
     tiers.map((t) => ({
       from: t.from === 0 ? 0 : Math.round((t.from * income) / THRESHOLD_STEP) * THRESHOLD_STEP,

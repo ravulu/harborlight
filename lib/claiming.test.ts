@@ -144,10 +144,17 @@ describe('the crossover this plan actually has', () => {
   })
 
   it('reports nothing rather than a number when waiting never catches up', () => {
-    // A large married household, where the benefit is small beside the pot and
-    // the wider brackets leave more of that pot intact — so the savings spent
-    // bridging to 70 outweigh the larger cheque at every age up to 100.
-    // Returning the search bound here would be a fabricated finding.
+    // A large married household whose benefit is small beside the pot, so the
+    // savings spent bridging to 70 outweigh the larger cheque at every age up
+    // to 100. Returning the search bound here would be a fabricated finding.
+    //
+    // The benefit had to come down to keep this true. On $3,000 and $2,000 the
+    // same household used to have no crossover and now has one at 98, and the
+    // reason is the IRMAA fade (`PREMIUM_EXCESS_FADES_BY`): bridging to 70 is
+    // paid for out of the 401(k), which raises MAGI, which used to be charged
+    // a surcharge growing 3.5 points over inflation for sixty straight years.
+    // That assumption, not the claiming arithmetic, was what kept waiting
+    // permanently behind. Worth knowing that the two interact at all.
     const rich = plan({
       currentAge: 30,
       retirementAge: 65,
@@ -157,14 +164,15 @@ describe('the crossover this plan actually has', () => {
       balance401k: 1_000_000,
       monthlyContribution: 0,
       monthlyRetirementSpending: 20_000,
-      socialSecurityMonthly: 3_000,
-      spouseBenefitMonthly: 2_000,
+      socialSecurityMonthly: 2_000,
+      spouseBenefitMonthly: 1_300,
     })
     expect(crossoverAge(rich, 67, 70)).toBeNull()
-    // The same household filing singly does cross, which is what shows the
-    // null above is a property of the plan and not of the search giving up.
+    // The same household with a benefit worth waiting for does cross, which is
+    // what shows the null above is a property of the plan and not of the
+    // search giving up.
     expect(
-      crossoverAge({ ...rich, filingStatus: 'single', spouseBenefitMonthly: 0 }, 67, 70),
+      crossoverAge({ ...rich, socialSecurityMonthly: 3_000, spouseBenefitMonthly: 2_000 }, 67, 70),
     ).not.toBeNull()
   })
 

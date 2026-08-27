@@ -313,7 +313,7 @@ export function HoldingsScreen({
                     </span>
                     {h.counted && (
                       <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] font-medium text-accent-foreground">
-                        counted in the plan
+                        to spend in retirement
                       </span>
                     )}
                   </span>
@@ -949,15 +949,33 @@ export function HoldingsScreen({
                         paid
                       </label>
                     )}
+                    {/* This used to read "Count it in the plan", which the
+                        plan does not do: nothing on the register reaches
+                        `simulate`, and `netWorth`'s counted/held split is read
+                        by no component. The tick is kept because the intention
+                        is worth recording and is saved with the plan — it is
+                        the answer to a question the projection will ask when
+                        the two are joined. What it must not do is claim to
+                        have been asked already. */}
                     <label className="flex items-center gap-2 text-xs text-muted-foreground">
                       <input
                         type="checkbox"
                         checked={h.counted}
                         onChange={(e) => patch(h.id, { counted: e.target.checked })}
                       />
-                      Count it in the plan
+                      I expect to spend this in retirement
                     </label>
                   </div>
+
+                  {/* Outside the row above, which is `flex flex-wrap` — a
+                      paragraph in there is another item competing for the
+                      line rather than a note under it. */}
+                  <p className="text-xs text-muted-foreground text-pretty">
+                    Noted, not yet modelled. The projection does not draw on
+                    anything you own here, so ticking that changes no figure on
+                    the page — your balance and the years it lasts are the same
+                    either way.
+                  </p>
 
                   {/* The one kind here that a household might also have
                       entered in the planner. Everything else is illiquid and

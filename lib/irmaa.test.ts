@@ -8,6 +8,9 @@ import {
   IRMAA_YEARS,
   ASSUMED_INDEXATION,
   ASSUMED_PREMIUM_GROWTH,
+  PREMIUM_EXCESS_FADES_BY,
+  premiumGrowthIn,
+  premiumMultiple,
   currentIrmaaYear,
   irmaaTableFor,
   IRMAA_YEAR,
@@ -486,9 +489,8 @@ describe('the surcharge charged in the projection', () => {
     socialSecurityAge: 70,
   }
 
-  it('grows in real terms at premium growth net of inflation', () => {
+  it("grows in real terms at that year's own premium growth, net of inflation", () => {
     const infl = inputs.inflationRate / 100
-    const expected = (1 + ASSUMED_PREMIUM_GROWTH) / (1 + infl)
     const doubleCounted = 1 + ASSUMED_PREMIUM_GROWTH
 
     const charged = simulate(inputs).rows.filter((r) => r.irmaaSurcharge > 0)
@@ -496,13 +498,20 @@ describe('the surcharge charged in the projection', () => {
 
     // Year-on-year steps, ignoring the jumps where the household crosses into
     // a higher tier — those are a change of tier, not a change of price.
+    //
+    // The expected step is no longer one number. `premiumMultiple` is a
+    // product of rates that fade, so the step into year Y is the rate that
+    // applied over the year before it — hence the `- 1`. Getting that offset
+    // wrong shows up here as a consistent lag, which is the point of checking
+    // every step rather than the total.
     const steps = charged
       .slice(1)
-      .map((r, i) => r.irmaaSurcharge / charged[i].irmaaSurcharge)
-      .filter((ratio) => ratio < 1.5)
+      .map((r, i) => ({ year: r.year, ratio: r.irmaaSurcharge / charged[i].irmaaSurcharge }))
+      .filter((s) => s.ratio < 1.5)
 
     expect(steps.length).toBeGreaterThan(3)
-    for (const ratio of steps) {
+    for (const { year, ratio } of steps) {
+      const expected = (1 + premiumGrowthIn(year - IRMAA_YEAR - 1)) / (1 + infl)
       expect(ratio).toBeCloseTo(expected, 3)
       // The value the double-counting bug produced, named so the test says
       // what it is defending against.
@@ -510,12 +519,93 @@ describe('the surcharge charged in the projection', () => {
     }
   })
 
-  it('is reported in today\'s dollars, like every other flow on the row', () => {
+  it('charges a long plan a fraction of what flat compounding did', () => {
+    // The change this is defending. Grown flat at 6% for a 59-year horizon,
+    // the surcharge reached roughly seven times its real cost today and the
+    // lifetime figure was mostly the assumption. The fade is what stops it,
+    // and a plan long enough to show it is the only place the difference is
+    // visible.
+    const long: PlanInputs = { ...inputs, currentAge: 30, retirementAge: 65, endAge: 90 }
+    const yearsOut = 90 - 30
+    const faded = premiumMultiple(yearsOut)
+    const flat = Math.pow(1 + ASSUMED_PREMIUM_GROWTH, yearsOut)
+    expect(faded).toBeLessThan(flat / 3)
+    // And it is still growing, just not away from everything else: the
+    // surcharge must never fall in nominal terms.
+    expect(faded).toBeGreaterThan(Math.pow(1 + ASSUMED_INDEXATION, yearsOut))
+    expect(simulate(long).totalIrmaa).toBeGreaterThan(0)
+  })
+
+  it("is reported in today's dollars, like every other flow on the row", () => {
     const rows = simulate(inputs).rows
     const first = rows.find((r) => r.irmaaSurcharge > 0)!
     // A first-tier surcharge is about $1,150 a year in 2026 money. Inflated
     // twice it would be several times that by the time it is first charged.
     expect(first.irmaaSurcharge).toBeLessThan(4_000)
     expect(first.irmaaSurcharge).toBeGreaterThan(500)
+  })
+})
+
+/**
+ * The fade, which is the difference between a projection and a compounding
+ * assumption.
+ *
+ * `ASSUMED_PREMIUM_GROWTH` is defensible for the years just ahead and
+ * indefensible for fifty of them: held flat it implies Medicare premiums
+ * become seven times more expensive than everything else a household buys, and
+ * on a long plan most of the lifetime figure was that implication rather than
+ * the household's income. These pin the shape that replaced it — near years at
+ * the observed rate, far years tracking the thresholds, and a real cost that
+ * settles instead of compounding.
+ */
+describe('the premium excess fades toward the indexation rate', () => {
+  it('starts at the observed rate and ends at the indexation rate', () => {
+    expect(premiumGrowthIn(0)).toBeCloseTo(ASSUMED_PREMIUM_GROWTH, 10)
+    expect(premiumGrowthIn(PREMIUM_EXCESS_FADES_BY)).toBeCloseTo(ASSUMED_INDEXATION, 10)
+    // And stays there. Premiums falling in real terms is not something this is
+    // willing to assume, and it would understate the cost.
+    expect(premiumGrowthIn(PREMIUM_EXCESS_FADES_BY + 40)).toBeCloseTo(ASSUMED_INDEXATION, 10)
+  })
+
+  it('never rises again, and never dips below indexation', () => {
+    let previous = Infinity
+    for (let y = 0; y <= 80; y++) {
+      const rate = premiumGrowthIn(y)
+      expect(rate).toBeLessThanOrEqual(previous + 1e-12)
+      expect(rate).toBeGreaterThanOrEqual(ASSUMED_INDEXATION - 1e-12)
+      previous = rate
+    }
+  })
+
+  it('settles the real multiple rather than compounding it', () => {
+    // The whole point, stated as an assertion: past the fade the surcharge
+    // rises with the thresholds, so what it costs in today's money stops
+    // moving. Twenty years out and sixty years out are the same real figure.
+    const real = (years: number) =>
+      premiumMultiple(years) / Math.pow(1 + ASSUMED_INDEXATION, years)
+    expect(real(PREMIUM_EXCESS_FADES_BY)).toBeCloseTo(real(60), 6)
+    expect(real(60)).toBeLessThan(1.5)
+    expect(real(60)).toBeGreaterThan(1.2)
+  })
+
+  it('is a product of the yearly rates, not a power of the first one', () => {
+    // A power would be the bug this replaced. Checked against the definition
+    // rather than a constant, so the two cannot drift apart.
+    let expected = 1
+    for (let y = 0; y < 35; y++) expected *= 1 + premiumGrowthIn(y)
+    expect(premiumMultiple(35)).toBeCloseTo(expected, 10)
+    expect(premiumMultiple(0)).toBe(1)
+    expect(premiumMultiple(-5)).toBe(1)
+  })
+
+  it('still charges the near years at the rate Part B has actually run at', () => {
+    // The fade must not quietly become a discount on the decade anybody
+    // reading this is likely to live through.
+    const table = irmaaTableFor(IRMAA_YEAR + 1)
+    const base = IRMAA_TABLES[IRMAA_YEAR]
+    expect(table.tiers.single[1].partB / base.tiers.single[1].partB).toBeCloseTo(
+      1 + ASSUMED_PREMIUM_GROWTH,
+      2,
+    )
   })
 })

@@ -120,6 +120,14 @@ describe('claims the engine has to keep true', () => {
     expect(a).toContain(`${Math.round(benefitFactor(70) * 100)}%`)
   })
 
+  it('says the premium assumption fades, because the engine fades it', () => {
+    // The engine stopped compounding the excess over the thresholds
+    // (`PREMIUM_EXCESS_FADES_BY`). An answer describing it as grown faster
+    // than prices for the whole plan would be describing the older engine, and
+    // overstating a cost it no longer charges.
+    expect(answer('Does it account for inflation').a).toMatch(/fade/i)
+  })
+
   it('does not promise statutory indexation it does not perform', () => {
     // Past the last published table the brackets are carried forward at an
     // assumed rate, not by the chained-CPI the law uses.

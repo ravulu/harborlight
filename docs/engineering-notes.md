@@ -92,22 +92,58 @@ two rates, and computes the plan's own real multiple (7.2× on plan 220, 3.6× o
 a shorter plan). Gated behind `realMultiple >= 1.5` so short plans do not carry
 an irrelevant caveat.
 
-**Not done:** decaying the excess growth toward the indexation rate over ~20
-years. One constant plus a test, but it moves every plan's IRMAA figure, so it
-needs an explicit decision.
+**Done, 2026-08-27: the excess fades.** `PREMIUM_EXCESS_FADES_BY = 20` in
+`lib/irmaa.ts`. The 3.5 points by which the surcharges outrun the thresholds
+slide to zero over twenty years, after which both move at
+`ASSUMED_INDEXATION` — so the premium keeps rising with prices and stops
+rising against them. `premiumGrowthIn(years)` is the rate; `premiumMultiple`
+is the cumulative factor, a product rather than a power, which is the one
+mechanical thing to remember when reading `projectTable`.
+
+What it did to the two plans measured above:
+
+| | flat 6% | faded | |
+| --- | ---: | ---: | --- |
+| Lifetime IRMAA, 59-year plan | $839,821 | $195,948 | −77% |
+| Worst single year | $92,150 | $18,117 | |
+| Closing balance | $42,294,686 | $43,101,509 | +$806,823 |
+| Lifetime IRMAA, 24-year plan | $27,028 | $19,586 | −28% |
+
+The near-retiree moves least, which is the shape wanted: the years anybody is
+actually likely to live through are still charged at the observed rate, and it
+is the far ones nobody can defend that come down. What survives is a
+permanently higher real cost — the surcharge settles at about 1.4x today's in
+real terms — rather than one that compounds to 7x.
+
+**It changed an answer, not only a number.** `lib/claiming.test.ts` had a
+household for which waiting to 70 never caught up; it now crosses over at 98.
+Bridging to 70 is paid out of the 401(k), which raises MAGI, which used to
+attract a surcharge growing 3.5 points over inflation for sixty straight
+years — so the assumption, not the claiming arithmetic, was what kept waiting
+permanently behind. The test now uses a smaller benefit, and says why. Worth
+knowing that these two interact at all before touching either.
+
+**Not done:** the fade's own shape is linear to zero and its horizon is a
+judgement rather than a published figure. If a Trustees' long-range assumption
+is worth reading, that is the number to replace.
 
 ---
 
-## 3b. The projection does not charge health premiums
+## 3b. Health premiums: priced before 65, never after
 
-`lib/aca.ts` is imported by `lib/conversions.ts` and by **nothing in
-`lib/retirement.ts`**. The base projection charges the IRMAA *surcharge*
+**Where it stands.** `lib/retirement.ts` imports `acaCostFor` and prices
+marketplace cover year by year up to 65. From 65 the plan charges the IRMAA
+*surcharge* and nothing else — see *Still true* at the end of this section.
+
+**How it got here**, because the reasoning is the part worth keeping.
+`lib/aca.ts` was imported by `lib/conversions.ts` and by **nothing in
+`lib/retirement.ts`**. The base projection charged the IRMAA *surcharge*
 (`irmaaSurcharge`) and never the standard Part B premium, and never a
 marketplace premium at all.
 
-That division is defensible — the surcharge depends on the plan's own income,
-the premium does not — but it means **every health premium reaches the plan
-only if somebody types it into the spending figure.** For anyone retiring
+That division was defensible — the surcharge depends on the plan's own income,
+the premium does not — but it meant **every health premium reached the plan
+only if somebody typed it into the spending figure.** For anyone retiring
 before 65 that is the largest single line in their early retirement, and until
 2026-08-25 the expense estimator did not even offer a box for it: the health
 category listed Medicare items only, so an early retiree saw nothing that
@@ -153,19 +189,40 @@ covers 65-onward costs — that division is now stated in the category hint.
 
 ## 3c. Holdings is the start of a family balance sheet
 
-`/holdings` looks like an alternative-investments screen. It is the first
-piece of something larger: a household balance sheet and its future cash
-flows, decided 2026-08-26. Read it that way before changing it.
+The register — the *Assets & liabilities* tab of `/planner`, and until
+2026-08-27 a page of its own at `/holdings`, which now redirects — looks like
+an alternative-investments screen. It is the first piece of something larger: a
+household balance sheet and its future cash flows, decided 2026-08-26. Read it
+that way before changing it.
 
 Two consequences that are already live:
 
-**`Holding.counted` is a placeholder, not dead code.** It currently does one
-thing — moves a holding's equity between the two totals at the top of the
-screen. Its label says "Count it in the plan", which promises a reach into the
-retirement projection that does not exist: nothing outside `/holdings` imports
-`lib/holdings.ts`. That mismatch is known and deliberately left alone until the
-integration is designed. **Do not delete it as unused, and do not wire it to
-`simulate` without that design.**
+**`Holding.counted` is a placeholder, not dead code — and it now does less
+than this section first said.** It moved a holding's equity between the
+`counted` and `held` totals of `netWorth`, and those two fields are no longer
+read by anything: `familyNetWorth` in `lib/net-worth.ts` takes `total` and
+`debt` from that result and nothing else, and no component reads either. So
+the checkbox changes no figure on any screen.
+
+What it changed was a badge. The checkbox said "Count it in the plan" and the
+badge "counted in the plan", both promising a reach into the retirement
+projection that does not exist. `lib/holdings.ts` is imported outside the
+register now — `lib/net-worth.ts` and `holdings-summary.tsx` both read it — but
+never by `lib/retirement.ts`, and that is the import that would make the label
+true.
+
+**Relabelled 2026-08-27**, in `components/holdings/holdings-screen.tsx`: the
+tick reads "I expect to spend this in retirement" over a note saying the
+projection does not draw on anything here, and the badge reads "to spend in
+retirement". The field and the control are kept — the intention is worth
+recording and is saved with the plan — and what they no longer do is claim to
+have been used.
+
+**Do not delete it as unused, and do not wire it to `simulate` without the
+design in §3e**, which now sets out what a tick can and cannot be made to mean.
+The label was the cheap half: every other approximation in this app is
+disclosed with the direction of its error, and this one told the reader the
+opposite of what happens.
 
 **The planner already holds part of the balance sheet.** Brokerage, 401(k),
 IRA, Roth and HSA live on `PlanInputs`. When the two are joined, those must
@@ -173,12 +230,16 @@ appear once and not twice — the obvious failure is a net-worth figure that
 double-counts every retirement account. Whatever merges them needs a single
 owner for each balance, not two stores that happen to agree.
 
-Not yet modelled and worth naming before the shape hardens: liabilities with no
-asset attached (student loans, cards, car loans), non-investment assets (cash,
-vehicles, 529s), ownership between spouses, and the outgoing side of the cash
-flows. The projection models spending as one figure; a balance sheet models it
-as a set of obligations, and those are different enough that merging them is a
-design decision rather than a merge.
+Two of the four gaps this section first named are closed. Liabilities with no
+asset attached are modelled — `lib/liabilities.ts`, with payoff and the
+never-clears case — and so are non-investment assets, as the `personal` and
+`deposit` kinds.
+
+Still not modelled, and worth naming before the shape hardens: 529s, ownership
+between spouses, and the outgoing side of the cash flows. The projection models
+spending as one figure; a balance sheet models it as a set of obligations, and
+those are different enough that merging them is a design decision rather than a
+merge.
 
 ### The ownership rule, decided 2026-08-26
 
@@ -195,10 +256,16 @@ family net worth at age N
 ```
 
 Nothing appears twice by construction, so there is no dedupe step to get wrong.
-Worth enforcing rather than trusting: a test that `HOLDING_KINDS` never grows a
-liquid member, and that `lib/holdings.ts` never imports a balance field from the
-planner, catches a double-count when it is introduced rather than in a net-worth
-figure nobody reconciles.
+That is enforced rather than trusted, in `describe('the line between this and
+the planner')` in `lib/holdings.test.ts`: one test refuses any kind the planner
+already holds, by kind and by label, and a second pins the list of nine kinds
+outright, so adding one is a decision about the line rather than a detail. Both
+catch a double-count when it is introduced rather than in a net-worth figure
+nobody reconciles.
+
+The two kinds that bend the rule are `deposit` and `syndication`, and the test
+carries the reasoning: the organising principle is how a thing is *taxed*, and
+liquidity is usually the same answer but not always.
 
 ### One abstraction covers the lot
 
@@ -389,6 +456,48 @@ Two consequences to expect:
 - **Monte Carlo runs 10,000 times.** Holdings would be deterministic overlays
   at first, so property growth is certain while markets are not. Defensible,
   but it has to be said on the page rather than left implicit.
+
+- **Monte Carlo needs an inflow array, and this is the trap.** `runMonteCarlo`
+  does not re-run the projection per path: it takes `currentSavings`,
+  `contribution[]` and `withdrawal[]` from one `simulate` call and rebuilds
+  every path from those three (`lib/monte-carlo.ts`). Proceeds landing in a pot
+  *inside* `simulate` therefore never reach it — the balance rises in the table
+  and not in the ten thousand runs, so confidence would be reported against a
+  plan that never received the money. The year's withdrawal is already smaller
+  because the proceeds funded it, which makes the error look like a plausible
+  number rather than a missing line. This is the RMD-surplus trap in §5 again,
+  in the opposite direction: there the fix was netting an outflow, here it is
+  adding an inflow in both phases.
+
+### What a tick on `counted` cannot mean
+
+Worth settling before phase 3, because the checkbox is already on the screen
+and already stored per holding.
+
+The only mechanism that turns equity into money a plan can spend is a sale, and
+`endAgeOf` returns `h.saleAge` or null. **For the home you live in — the
+largest holding most households have, and the one the empty state tells them to
+enter first — there is no sale age, so no phase here makes "I expect to spend
+this in retirement" true.** Phase 3 gives the tick a meaning for a rental with
+a sale age and leaves it meaningless for the house.
+
+Three ways out, none of them free:
+
+- **Counted requires an end date.** The tick stops being a tick and becomes
+  derived from "do you sell it, and when" — one question instead of two, and it
+  cannot be answered in a way the engine ignores.
+- **Counted without a date means sold at `endAge`.** Cheap to implement and
+  wrong in an interesting way: it is a bequest question, not a funding one, and
+  a household that means to leave the house to its children would be shown the
+  opposite of its plan.
+- **Counted stays an intention only**, recorded and never modelled, and the
+  label says so. This is where it sits today, since 2026-08-27, and it is the
+  honest version of doing nothing.
+
+Until one of those is chosen, do not let the copy drift back toward claiming
+the projection uses it. The current wording — "I expect to spend this in
+retirement", with a note that the projection does not draw on it — is the
+version that survives all three outcomes.
 
 ### The four phases
 

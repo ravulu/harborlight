@@ -760,7 +760,7 @@ function RothConversions({
                 </th>
               )}
               <th className="px-3 py-1.5 font-medium text-right">
-                Forced out at {c.toAge + 1}
+                RMD at {c.toAge + 1}
                 <span className="block text-[10px] font-normal normal-case">
                   first year
                 </span>
@@ -930,10 +930,10 @@ function RothConversions({
               between one row and the next.
             </Column>
           )}
-          <Column name={`Forced out at ${c.toAge + 1}`}>
-            What the government makes you take out of the 401(k) that year,
-            whether you need it or not. Move money now and there is less left to
-            be forced out later.
+          <Column name={`RMD at ${c.toAge + 1}`}>
+            The required minimum distribution: what the government makes you
+            take out of the 401(k) that year, whether you need it or not. Move
+            money now and there is less left to be forced out later.
           </Column>
           <Column name="Tax-free at the end">
             Of whatever is left at {endAge}, the share sitting in the Roth —

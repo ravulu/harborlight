@@ -6,6 +6,8 @@ import { TARGET_CONFIDENCE } from '@/lib/suggestions'
 import { rmdAge } from '@/lib/rmd'
 import {
   ASSUMED_PREMIUM_GROWTH,
+  PREMIUM_EXCESS_FADES_BY,
+  premiumMultiple,
   IRMAA_YEAR,
   LOOKBACK_YEARS,
   MEDICARE_AGE,
@@ -215,13 +217,19 @@ export function buildInsights(
     // total. A reader who is not told this reasonably assumes the number is
     // today's rates repeated, and it is not.
     const infl = inputs.inflationRate / 100
-    const realMultiple = Math.pow(
-      (1 + ASSUMED_PREMIUM_GROWTH) / (1 + infl),
-      Math.max(0, worst.year - IRMAA_YEAR),
-    )
+    // The engine's own curve, not a power of the headline rate: the excess
+    // over the thresholds fades out, so a formula here would disagree with the
+    // figure it is explaining — and this paragraph exists to be checkable.
+    const yearsOut = Math.max(0, worst.year - IRMAA_YEAR)
+    const realMultiple = premiumMultiple(yearsOut) / Math.pow(1 + infl, yearsOut)
     // Below this the effect is not worth a paragraph, and on a short plan it
     // barely exists. Said only where it is actually driving the figure.
-    const premiumsOutpace = realMultiple >= 1.5
+    //
+    // Was 1.5, which the fade put out of reach: the excess now stops
+    // compounding after `PREMIUM_EXCESS_FADES_BY` years, so the real multiple
+    // settles near 1.4x and never climbs past it. A gate nothing can satisfy
+    // is a disclosure that never appears.
+    const premiumsOutpace = realMultiple >= 1.25
 
     out.push({
       key: 'irmaa',
@@ -252,13 +260,16 @@ export function buildInsights(
         `${
           premiumsOutpace
             ? ` Part of what drives the figure: the surcharge is the only number here ` +
-              `assumed to rise faster than prices. Medicare premiums are grown at ` +
+              `assumed to rise faster than prices. Medicare premiums start at ` +
               `${Math.round(ASSUMED_PREMIUM_GROWTH * 100)}% a year against ` +
               `${inputs.inflationRate}% inflation, because Part B has outrun the cost of living for most ` +
-              `of the past decade. Everything on this page is in today's money, so that gap shows up as ` +
-              `real growth: by ${worst.age} the plan is charged roughly ` +
-              `${realMultiple.toFixed(1)}× what the same income costs a household today. That is the ` +
-              `cautious end of a long-run assumption rather than a forecast — the further out the year, ` +
+              `of the past decade — and that gap is faded out over ${PREMIUM_EXCESS_FADES_BY} years, ` +
+              `after which the surcharge simply rises with the thresholds. A rate that outruns prices ` +
+              `for a decade is history; one that does it for fifty years is a claim nobody makes. ` +
+              `Everything on this page is in today's money, so what is left shows up as real growth: ` +
+              `by ${worst.age} the plan is charged roughly ` +
+              `${realMultiple.toFixed(1)}× what the same income costs a household today. That is a ` +
+              `long-run assumption rather than a forecast — the further out the year, ` +
               `the more of the figure is the assumption and the less is your income.`
             : ''
         }`,
