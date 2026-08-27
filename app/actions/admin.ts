@@ -234,7 +234,19 @@ export interface UsageSummary {
 }
 
 /** Enough to see the last stretch of activity, not a log viewer. */
-const RECENT_SESSIONS = 12
+/**
+ * How many visits the list carries.
+ *
+ * Twelve, until the range could be widened past ninety days — at which point
+ * asking for a year still returned the same twelve, so the totals moved and
+ * the list did not. Each visit brings its own events along, so this is a real
+ * cost rather than a free number; fifty is a page worth reading without being
+ * a query worth worrying about.
+ *
+ * Whatever it is, the reader is told when it bites: a list that is quietly
+ * the most recent fifty of six hundred reads as six hundred.
+ */
+const RECENT_SESSIONS = 50
 
 /** Read in order, so the drop between any two is the interesting number. */
 const FUNNEL: { name: string; label: string }[] = [

@@ -308,7 +308,7 @@ export function Usage() {
           />
 
           {data.recentSessions.length > 0 && (
-            <Visits sessions={data.recentSessions} />
+            <Visits sessions={data.recentSessions} of={data.visits} />
           )}
         </div>
       )}
@@ -387,7 +387,14 @@ function Opened({
  * each is sixty rows, which is a log rather than a view. The summary line
  * carries the part that is usually enough: when, how far, from where.
  */
-function Visits({ sessions }: { sessions: UsageSummary['recentSessions'] }) {
+function Visits({
+  sessions,
+  of,
+}: {
+  sessions: UsageSummary['recentSessions']
+  /** Every visit in the range, so a truncated list can say it is truncated. */
+  of: number
+}) {
   return (
     <div className="border-t border-border pt-4">
       <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -395,6 +402,11 @@ function Visits({ sessions }: { sessions: UsageSummary['recentSessions'] }) {
         {/* Named, because an unlabelled time invites being read against
             whatever clock the reader happens to be sitting next to. */}
         <span className="normal-case tracking-normal text-muted-foreground/70">
+          {/* And said plainly when the list is only part of the range. A list
+              that is quietly the most recent fifty of six hundred reads as six
+              hundred, and every conclusion drawn from it is drawn from the
+              wrong denominator. */}
+          {of > sessions.length && `· ${sessions.length} of ${of.toLocaleString()} `}
           · times in {adminZoneLabel()}
         </span>
       </p>
