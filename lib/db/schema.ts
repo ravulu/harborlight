@@ -85,7 +85,13 @@ export const verification = pgTable('verification', {
 
 export const retirementPlans = pgTable('retirement_plans', {
   id: serial('id').primaryKey(),
-  userId: text('userId').notNull(),
+  // Cascades. Without the constraint these were plain strings that
+  // happened to look like a user id, so deleting an account left its
+  // plans, its household and everything under them in the tables —
+  // unreachable, since nothing can look them up, and uncounted.
+  userId: text('userId')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   /** Who the plan is for. Defaults to the account holder, but a plan can be
       drawn up for someone else, so it lives on the plan rather than the user. */
@@ -174,7 +180,13 @@ export type NewRetirementPlan = typeof retirementPlans.$inferInsert
  * One row per user.
  */
 export const household = pgTable('household', {
-  userId: text('userId').primaryKey(),
+  // Cascades. Without the constraint these were plain strings that
+  // happened to look like a user id, so deleting an account left its
+  // plans, its household and everything under them in the tables —
+  // unreachable, since nothing can look them up, and uncounted.
+  userId: text('userId')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
   /**
    * Who this is. It sat on every plan as `personName`, which existed only to
    * let a plan be drawn up for somebody else — replaced by naming the plan
@@ -206,7 +218,13 @@ export const holdings = pgTable(
   'holdings',
   {
     id: text('id').primaryKey(),
-    userId: text('userId').notNull(),
+    // Cascades. Without the constraint these were plain strings that
+    // happened to look like a user id, so deleting an account left its
+    // plans, its household and everything under them in the tables —
+    // unreachable, since nothing can look them up, and uncounted.
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     /** The plan these belong to. Gone when it is. */
     planId: integer('planId')
       .notNull()
@@ -269,7 +287,13 @@ export const liabilities = pgTable(
   'liabilities',
   {
     id: text('id').primaryKey(),
-    userId: text('userId').notNull(),
+    // Cascades. Without the constraint these were plain strings that
+    // happened to look like a user id, so deleting an account left its
+    // plans, its household and everything under them in the tables —
+    // unreachable, since nothing can look them up, and uncounted.
+    userId: text('userId')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     planId: integer('planId')
       .notNull()
       .references(() => retirementPlans.id, { onDelete: 'cascade' }),

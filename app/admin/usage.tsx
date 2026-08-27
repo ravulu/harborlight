@@ -1,9 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
-import { Activity, ChevronDown } from 'lucide-react'
+import { Activity, ChevronDown, Trash2 } from 'lucide-react'
 
-import { getUsage, type UsageSummary } from '@/app/actions/admin'
+import { deleteVisit, getUsage, type UsageSummary } from '@/app/actions/admin'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -308,7 +308,11 @@ export function Usage() {
           />
 
           {data.recentSessions.length > 0 && (
-            <Visits sessions={data.recentSessions} of={data.visits} />
+            <Visits
+              sessions={data.recentSessions}
+              of={data.visits}
+              onDeleted={() => load(from, to)}
+            />
           )}
         </div>
       )}
@@ -390,10 +394,13 @@ function Opened({
 function Visits({
   sessions,
   of,
+  onDeleted,
 }: {
   sessions: UsageSummary['recentSessions']
   /** Every visit in the range, so a truncated list can say it is truncated. */
   of: number
+  /** Reload after a removal, so the totals above move with the list. */
+  onDeleted: () => void
 }) {
   return (
     <div className="border-t border-border pt-4">
@@ -413,6 +420,31 @@ function Visits({
 
       <div className="mt-2 flex flex-col gap-1.5">
         {sessions.map((v) => (
+          <VisitRow key={v.session} v={v} onDeleted={onDeleted} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One visit, with a way to take it out.
+ *
+ * Two presses, not one. The icon sits beside a row that expands on a click,
+ * so a stray press is likely — and what it removes is gone from the database
+ * with nothing to undo it.
+ */
+function VisitRow({
+  v,
+  onDeleted,
+}: {
+  v: UsageSummary['recentSessions'][number]
+  onDeleted: () => void
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [pending, startTransition] = useTransition()
+
+  return (
           <details
             key={v.session}
             className="group rounded-lg border border-border px-3 [&_summary::-webkit-details-marker]:hidden"
@@ -442,7 +474,56 @@ function Visits({
                   {v.referrer ? ` · from ${v.referrer}` : ''}
                 </span>
               </span>
-              <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+              <span className="flex shrink-0 items-center gap-1">
+                {/* Inside a <summary>, so every press here would otherwise
+                    open or close the row as well. */}
+                {confirming ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={pending}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        startTransition(async () => {
+                          await deleteVisit(v.session)
+                          setConfirming(false)
+                          onDeleted()
+                        })
+                      }}
+                    >
+                      Delete
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setConfirming(false)
+                      }}
+                    >
+                      No
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`Delete this visit and its ${v.events.length} events`}
+                    className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setConfirming(true)
+                    }}
+                  >
+                    <Trash2 className="size-3.5" />
+                  </Button>
+                )}
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+              </span>
             </summary>
 
             <ul className="flex flex-col border-t border-border py-1.5">
@@ -470,8 +551,5 @@ function Visits({
               visit {v.session.slice(0, 8)}
             </p>
           </details>
-        ))}
-      </div>
-    </div>
   )
 }

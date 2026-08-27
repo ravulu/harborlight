@@ -451,3 +451,30 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
     recentSessions,
   }
 }
+
+/**
+ * Remove one visit and everything it did.
+ *
+ * A visit is a session id and the rows carrying it, so deleting the visit
+ * means deleting those rows — there is nothing else to unpick. Own testing,
+ * a bot that got through, a run that skews a small funnel: things worth
+ * taking out rather than reasoning around every time the numbers are read.
+ *
+ * Admin only, and checked here rather than trusted from the caller: a server
+ * action is an endpoint, and the page it is normally reached from is not a
+ * guard on it.
+ *
+ * Returns how many rows went, so the page can say what it did rather than
+ * quietly refresh.
+ */
+export async function deleteVisit(session: string): Promise<number> {
+  await requireAdmin('/admin')
+  const id = session.trim()
+  // An empty id would match every row with an empty session and is never a
+  // visit anybody clicked on.
+  if (!id) return 0
+  const gone = await db.delete(events).where(eq(events.session, id)).returning({
+    id: events.id,
+  })
+  return gone.length
+}

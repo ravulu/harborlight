@@ -1,10 +1,12 @@
 # Harborlight vs Boldin
 
-**Rewritten 24 August 2026**, one day after the first version. Boldin ships
+**Updated 27 August 2026.** Third version. Boldin ships
 changes weekly and [their release notes][releases] move faster than this file
-will, so treat every claim about them as true on 23 August and check before
-relying on it. Claims about Harborlight were taken from the code and from
-running it — `lib/rmd.ts`, `lib/irmaa.ts`, `lib/aca.ts`, `lib/conversions.ts` —
+will, so treat every claim about them as true on 23 August — when they were last
+checked against sources — and check before relying on it. Nothing about Boldin
+has been re-verified since; only the Harborlight column has moved. Claims about Harborlight were taken from the code and from
+running it — `lib/rmd.ts`, `lib/irmaa.ts`, `lib/aca.ts`, `lib/conversions.ts`,
+`lib/holdings.ts`, `lib/room.ts` —
 not from memory, and go stale the same way.
 
 Boldin was NewRetirement until 2024. Sources are linked throughout; the
@@ -14,16 +16,21 @@ paid tier is [PlannerPlus, $12/month or $144/year][pricing].
 
 ## The short version
 
-Boldin models the whole balance sheet. We model the savings-and-tax core in
-more depth than they do, and we explain it better.
+Boldin models the whole balance sheet and feeds it into the projection. We now
+model the balance sheet too — in more tax depth than they do — but it does not
+reach the projection yet.
 
-The first version of this file said we were *"a very good retirement tax and
-withdrawal calculator, not yet a retirement plan"*. Half of that was generous:
-the tax core had four things wrong with it that no test would have caught. The
-other half still stands, and it is the honest position today:
+The second version of this file said we were *"a genuinely complete retirement
+tax engine, wrapped in a plan that models only one side of the balance sheet"*.
+The second half is out of date. The honest position today:
 
-**We are a genuinely complete retirement tax engine, wrapped in a plan that
-models only one side of the balance sheet.**
+**Both sides of the balance sheet are modelled. Only one of them is wired into
+the projection, and the wire is the work that remains.**
+
+That is a smaller gap than the one it replaces — the figures exist and are
+taxed correctly; what is missing is that a sale's proceeds, a rental's income
+and a property's upkeep do not yet move the plan. It is also a gap the app
+states plainly on the page and in its FAQ rather than leaving to be discovered.
 
 ---
 
@@ -44,8 +51,31 @@ risks it singled out. Four bugs it did not know about are fixed.
 | Plans that run out of money | **reported as lasting** | Reported at the year they fail, with the size of the gap |
 | Withdrawals from empty accounts | **charted and taxed** | Capped at what the pots hold |
 
-There were 0 tests when the first version was written. There are now **224
-across 8 files**.
+There were 0 tests when the first version was written. There are now **491
+across 24 files**.
+
+---
+
+## What changed since 24 August
+
+Three days. The largest item on that version's shortfall table is no longer
+absent, and one of the two it did not know to list turned out to be a
+data-loss bug.
+
+| | 24 Aug | Now |
+|---|---|---|
+| Home equity and real estate | **Absent — "most retirees' largest asset"** | Modelled: home, rental, land, syndication, business, fund, crypto, personal property |
+| Debt and mortgages | Absent | Modelled, secured and unsecured, with payoff on sale |
+| Net worth | Not computed | Savings plus holdings less debts, live as you type |
+| Sale and maturity tax | Nothing | §121, depreciation recapture at 25%, §1202 QSBS, §1061 carry, NIIT, state — priced against **that year's own income from the plan** |
+| Certificates and private loans | Nothing | Split correctly: a bank reports interest yearly, an accruing note lands it all in one year |
+| ACA household size | Two adults, or one | Dependants by birth year, each coming off at 26; per-member rating on the federal age curve |
+| ACA family premiums | — | **Were 56% too high for a family of four** — every member was rated at the subscriber's age |
+| The low-bracket window | Not modelled | `roomByYear`: room per year to the bracket, the nil-rate gains band, the subsidy cliff and the next Medicare tier, with which one binds |
+| Saved plans losing their register | — | **Fixed.** Opening a plan from the list kept the previous register, and Save then wrote that over it |
+| Saved plans losing nine fields | — | **Fixed.** Employer match, HSA, survivor age and every health setting were dropped on write |
+| Households wiped to blank | — | **Fixed.** One render with an empty household destroyed the stored one, then saved the blank back over itself |
+| Orphaned rows on user delete | — | **Fixed.** Four tables had no foreign key; 91 of 98 plans were already stranded |
 
 ---
 
@@ -151,22 +181,61 @@ the browser. No account linking means no bank credentials to hand over.
 
 ---
 
+## Scorecard
+
+Scored on what each does for the decisions a tax-aware retiree actually makes,
+not on feature counts. **●●●** does it well and shows the working, **●●○** does
+it, **●○○** partial or named without being computed, **○○○** absent.
+
+| | Boldin | Harborlight | |
+|---|:---:|:---:|---|
+| **Withdrawal tax by account** | ●●○ | ●●● | Gains stacked on ordinary, per year, per state |
+| **Roth conversion decision** | ●●○ | ●●● | Solves the amount against tax, IRMAA *and* the ACA credit together |
+| **Required distributions** | ●●● | ●●● | Uniform Lifetime Table, 73–120 |
+| **Medicare surcharge** | ●●● | ●●● | Six tiers, two-year lookback, per person |
+| **ACA before 65** | ●●○ | ●●● | Cliff, applicable-percentage table, age curve, dependants ageing off at 26 |
+| **Social Security** | ●●● | ●●○ | Deep on claiming and spousal; survivor parked |
+| **Low-bracket window** | ○○○ | ●●● | No counterpart found in their product |
+| **Assets and property** | ●●● | ●●○ | Modelled and taxed well; does not feed the projection |
+| **Debt and mortgages** | ●●● | ●●○ | Same — held and netted, not charged to the plan |
+| **Balance sheet → projection** | ●●● | ○○○ | **The gap.** Theirs is joined; ours is not |
+| **Long-term care** | ●●● | ○○○ | A line in the expense estimator is not a model |
+| **Asset allocation / glide path** | ●●● | ●○○ | One return and volatility for the whole plan |
+| **Account linking** | ●●● | ○○○ | Deliberate, still a gap |
+| **Monte Carlo** | ●●● | ●●● | 10,000 runs both |
+| **Explains its own figures** | ●○○ | ●●● | Still the differentiator |
+| **Says where it is wrong** | ●○○ | ●●● | Direction of every known error stated in the app |
+| **Reports, export, advisor, classes** | ●●● | ○○○ | A different business, not a feature gap |
+| **Price** | $144/yr | Free | No account needed to get an answer |
+
+Read the three balance-sheet rows together. On paper we hold what they hold and
+tax it more carefully; in practice theirs changes the answer and ours does not
+yet. That is one gap counted three times, and anyone scoring this should say so.
+
+The Boldin column is as of 23 August and has not been re-checked. They ship
+weekly; assume it has moved.
+
+---
+
+
 ## Where we fall short
 
 Ranked by how much it matters. This is a shorter list than it was.
 
 | Gap | Boldin | Harborlight |
 |---|---|---|
-| **Home equity / real estate** | Modelled, with drawdown strategies | **Absent — and it is most retirees' largest asset** |
+| **The balance sheet does not reach the projection** | Joined | **Modelled and taxed, but inert.** A sale's proceeds, a rental's income and a property's upkeep change nothing |
 | **Long-term care** | Modelled | Absent. It is a line in the expense estimator, which is not the same thing |
-| **Debt / mortgage** | Modelled | Absent, same caveat |
 | **Survivor benefits** | Modelled | Built, then deliberately parked — see below |
 | **Asset allocation / glide path** | Yes | One return and volatility for the whole plan |
 | **Account linking** | Yes | No — deliberate, but still a gap |
 | Reports, export, advisor access, classes | Yes | None |
 
-Everything above the line in the old table — healthcare, the conversion
-optimiser, the HSA, the match, the penalty — has moved to the other list.
+Home equity, real estate and debt have moved off this list. What replaced them
+is narrower and more specific: the figures exist, they are taxed correctly, and
+nothing carries across. `docs/engineering-notes.md §3e` sets out the four phases
+that would join them, and why the register has to become an argument to
+`simulate` before any of it works.
 
 ---
 
@@ -189,6 +258,16 @@ remains is stated in the app itself, with the direction of the error:
   earner retiring at 65.
 - **Married filing separately** is not representable; such a filer is treated
   as single, which understates IRMAA.
+- **Selling costs are a flat 6%** on everything that is not a deposit or a
+  note — right for property, high for a fund or a business stake.
+- **A partner's share of partnership debt is not asked for**, so a
+  syndication's depreciation is taken from the K-1 figure entered rather than
+  tested against basis. §704(d) suspension is not modelled.
+- **The five-year Roth clock is tracked, not charged.** A conversion ladder
+  that is not yet seasoned looks cheaper here than it is — which matters most
+  to exactly the readers who use one.
+- **§72(t) and the rule of 55** are not modelled, so an early retiree's only
+  route to a 401(k) before 59½ is shown as the conversion ladder.
 
 ---
 
@@ -225,13 +304,24 @@ different company. Worth being deliberate about rather than drifting into.
 
 On the decisions that dominate a tax-aware retirement — when to convert, how
 much, what it does to Medicare and to health cover before 65, and what the
-distributions will force out later — we are now more complete than Boldin, and
-we show the working.
+distributions will force out later — we are more complete than Boldin, and we
+show the working. The low-bracket window has no counterpart in their product
+at all.
 
-On the balance sheet we are not close, and the house is the gap that matters.
+On the balance sheet the shape of the gap has changed. Three days ago the house
+was missing. Now it is held, valued, mortgaged, depreciated and taxed on the way
+out more carefully than they do it — and none of that moves the projection by a
+dollar. That is one wire, not a category, and it is the next thing worth
+building.
+
+Two things are worth saying plainly against a paid product. Everything the
+register does is free, needs no account to try, and stores nothing until
+somebody asks it to. And every place the arithmetic is approximate is named in
+the app with the direction of the error — which is not a feature anybody
+advertises, and is the reason to trust the figures that are not approximate.
 
 The position remains *the planner that shows its work*. What changed is that
-the working is now worth showing.
+there is now more work to show, and one visible seam where it stops.
 
 [pricing]: https://www.boldin.com/retirement/pricing/
 [healthcare]: https://www.boldin.com/retirement/sp-plp-ob-healthcare/
