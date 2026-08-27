@@ -25,6 +25,15 @@ export const EVENT_NAMES = [
   'goal_handoff',
   /** A plan was saved, which needs an account. */
   'plan_saved',
+  /**
+   * The first holding or debt was entered on Assets & liabilities.
+   *
+   * The tab being opened was already counted, and told us only that somebody
+   * clicked it. This is the other half: whether anyone, having looked, went on
+   * to put anything in. A tab people open and leave is a different problem
+   * from one they never find.
+   */
+  'register_started',
 ] as const
 
 export type EventName = (typeof EVENT_NAMES)[number]

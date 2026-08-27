@@ -6,6 +6,7 @@ import { Activity, ChevronDown } from 'lucide-react'
 import { getUsage, type UsageSummary } from '@/app/actions/admin'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { adminDay, adminTimeOnly, adminZoneLabel } from '@/lib/time'
 import { PLANNER_TABS, WORKSPACE_TABS } from '@/lib/planner-tabs'
@@ -21,11 +22,20 @@ function daysAgo(n: number) {
   return isoDay(d)
 }
 
-const RANGES = [
+/**
+ * The spans worth a button, and the two ends worth typing.
+ *
+ * `days: null` means no bound at all. Ninety days was the oldest thing this
+ * could be asked for, so anything before that simply could not be looked at —
+ * the figures were there and there was no way to name the window that held
+ * them.
+ */
+const RANGES: { label: string; days: number | null }[] = [
   { label: 'Today', days: 0 },
   { label: 'Last 7 days', days: 6 },
   { label: 'Last 30 days', days: 29 },
   { label: 'Last 90 days', days: 89 },
+  { label: 'All time', days: null },
 ]
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
@@ -39,19 +49,31 @@ const pct = (v: number) => `${Math.round(v * 100)}%`
  * the cliff is.
  */
 export function Usage() {
-  const [days, setDays] = useState(6)
+  // The window as two calendar days. Empty means unbounded on that side, which
+  // is what "All time" sets and what a half-filled pair of date boxes means.
+  const [from, setFrom] = useState(daysAgo(6))
+  const [to, setTo] = useState(daysAgo(0))
   const [data, setData] = useState<UsageSummary | null>(null)
   const [pending, startTransition] = useTransition()
 
-  const load = useCallback((n: number) => {
+  const load = useCallback((f: string, t: string) => {
     startTransition(async () => {
-      setData(await getUsage(daysAgo(n), daysAgo(0)))
+      setData(await getUsage(f, t))
     })
   }, [])
 
   useEffect(() => {
-    load(days)
-  }, [days, load])
+    load(from, to)
+  }, [from, to, load])
+
+  const pick = (days: number | null) => {
+    setFrom(days === null ? '' : daysAgo(days))
+    setTo(days === null ? '' : daysAgo(0))
+  }
+  const active = (days: number | null) =>
+    days === null
+      ? from === '' && to === ''
+      : from === daysAgo(days) && to === daysAgo(0)
 
   return (
     <Card className="p-6 gap-4">
@@ -60,17 +82,39 @@ export function Usage() {
           <Activity className="size-4 text-primary" />
           <h2 className="font-serif text-lg font-medium text-foreground">Usage</h2>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {RANGES.map((r) => (
             <Button
               key={r.label}
               size="sm"
-              variant={days === r.days ? 'default' : 'outline'}
-              onClick={() => setDays(r.days)}
+              variant={active(r.days) ? 'default' : 'outline'}
+              onClick={() => pick(r.days)}
             >
               {r.label}
             </Button>
           ))}
+          {/* For the window no button names. Either box may be left empty,
+              which drops the bound on that side rather than reading as a
+              date of nothing. */}
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Input
+              type="date"
+              aria-label="From"
+              value={from}
+              max={to || undefined}
+              onChange={(e) => setFrom(e.target.value)}
+              className="h-8 w-[9.5rem]"
+            />
+            to
+            <Input
+              type="date"
+              aria-label="To"
+              value={to}
+              min={from || undefined}
+              onChange={(e) => setTo(e.target.value)}
+              className="h-8 w-[9.5rem]"
+            />
+          </span>
         </div>
       </div>
 
@@ -235,6 +279,24 @@ export function Usage() {
             of={data.steps.find((s) => s.name === 'page_view')?.visits ?? 0}
             footnote="The retirement plan opens by default, so its count is people who went away and came back."
           />
+
+          {/* Opening a tab and using it are different facts, and only the
+              first was ever counted. A tab people find and leave is a
+              different problem from one they never find. */}
+          <p className="-mt-2 text-xs text-muted-foreground text-pretty">
+            <span className="font-medium text-foreground">
+              {data.registerStarted.toLocaleString()}
+            </span>{' '}
+            {data.registerStarted === 1 ? 'visit' : 'visits'} went on to enter a
+            holding or a debt
+            {(() => {
+              const opened =
+                data.sections.find((x) => x.label === 'Assets & liabilities')?.visits ?? 0
+              return opened > 0
+                ? ` — ${Math.round((data.registerStarted / opened) * 100)}% of those who opened Assets & liabilities.`
+                : '.'
+            })()}
+          </p>
 
           <Opened
             title="Tabs opened"

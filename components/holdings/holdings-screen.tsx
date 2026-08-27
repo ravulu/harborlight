@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { record } from '@/lib/usage'
 import { ChevronDown, Plus, RotateCcw, Trash2 } from 'lucide-react'
 
 import { Card } from '@/components/ui/card'
@@ -223,10 +224,19 @@ export function HoldingsScreen({
       holdings: s.holdings.map((h) => (h.id === id ? { ...h, ...over } : h)),
     }))
 
+  /**
+   * Once per visit, the first time anything is put on the register.
+   *
+   * A milestone, never a figure — the same contract every other event here
+   * keeps. It records that somebody started, not what they own.
+   */
+  const started = () => record('register_started', undefined, true)
+
   const add = (kind: HoldingKind) => {
     const h = blankHolding(kind)
     setState((s) => ({ ...s, holdings: [...s.holdings, h] }))
     setOpen((o) => [...o, h.id])
+    started()
   }
 
   // Read once. A maturity year is measured against it, and taking it per
@@ -1032,7 +1042,10 @@ export function HoldingsScreen({
 
       <LiabilitiesList
         liabilities={state.liabilities}
-        onChange={(liabilities) => setState((s) => ({ ...s, liabilities }))}
+        onChange={(liabilities) => {
+          if (liabilities.length > state.liabilities.length) started()
+          setState((s) => ({ ...s, liabilities }))
+        }}
       />
 
       {sales.length > 0 && <Timeline sales={sales} />}

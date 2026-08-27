@@ -198,6 +198,15 @@ export interface UsageSummary {
   /** The two top-level tabs: the plan, and the register beside it. */
   sections: { label: string; visits: number }[]
   /**
+   * Visits that put something on the register, not just opened the tab.
+   *
+   * Counted beside the section opens rather than in the funnel: entering a
+   * house is not a step on the way to saving a plan, it is a different thing
+   * somebody chose to do. Against the open count it answers the only question
+   * worth asking of a new tab — do the people who find it use it.
+   */
+  registerStarted: number
+  /**
    * The last few visits, each with what it did, in order.
    *
    * Grouped by session rather than by person, because a person is not
@@ -245,10 +254,34 @@ const FUNNEL: { name: string; label: string }[] = [
  */
 export async function getUsage(from: string, to: string): Promise<UsageSummary> {
   await requireAdmin('/admin')
-  const start = new Date(from)
-  const end = new Date(to)
-  end.setDate(end.getDate() + 1)
-  const window = and(gte(events.createdAt, start), lt(events.createdAt, end))
+
+  /**
+   * Either end may be left out, which means no bound on that side.
+   *
+   * It used to take both as given and hand them to `new Date`, so the only
+   * ranges it could answer were the ones its own buttons offered — nothing
+   * older than ninety days, and no way to ask. An unparsed date became an
+   * Invalid Date and every comparison against it was false, which returns an
+   * empty page rather than an error.
+   */
+  const dayStart = (d: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d.trim())
+    if (!m) return null
+    const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+    return Number.isNaN(at.getTime()) ? null : at
+  }
+
+  const start = dayStart(from)
+  const endDay = dayStart(to)
+  // The instant after the last day ends, so `lt` keeps every moment within it.
+  const end = endDay ? new Date(endDay.getTime() + 24 * 60 * 60 * 1000) : null
+
+  const window = and(
+    ...[
+      start ? gte(events.createdAt, start) : undefined,
+      end ? lt(events.createdAt, end) : undefined,
+    ].filter(Boolean),
+  )
 
   const [{ visits = 0 } = {}] = await db
     .select({ visits: countDistinct(events.session) })
@@ -331,6 +364,11 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
     .map((r) => ({ label: tabLabel(r.path), visits: r.visits }))
     .sort((a, b) => b.visits - a.visits)
 
+  const [{ registerStarted = 0 } = {}] = await db
+    .select({ registerStarted: countDistinct(events.session) })
+    .from(events)
+    .where(and(window, eq(events.name, 'register_started')))
+
   const sections = tabRows
     .filter((r) => isSectionPath(r.path))
     .map((r) => ({ label: tabLabel(r.path), visits: r.visits }))
@@ -397,6 +435,7 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
     places,
     tabs,
     sections,
+    registerStarted,
     recentSessions,
   }
 }
