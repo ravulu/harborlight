@@ -16,7 +16,7 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = pageMetadata({
   title: 'Sign in',
   description:
-    'Sign in to Harborlight to open your saved retirement plans.',
+    'Sign in to Fairwater to open your saved retirement plans.',
   path: '/sign-in',
 })
 

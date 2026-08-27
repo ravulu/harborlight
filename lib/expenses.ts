@@ -194,7 +194,7 @@ export function splitExpenses(values: Record<string, number>) {
 }
 
 /** Kept for the tab that opened the dialog, and no longer than that. */
-const STORAGE_KEY = 'harborlight_expenses'
+const STORAGE_KEY = 'fairwater_expenses'
 
 /**
  * Reads what was typed earlier in this tab. Anything unrecognised is treated

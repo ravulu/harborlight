@@ -12,10 +12,10 @@ export function SiteFooter() {
             drew a border around a footer that is already inside one. */}
         <div className="flex flex-col gap-1">
           <p className="text-foreground/70">
-            Harborlight — Retirement planning tools
+            Fairwater — Retirement planning tools
           </p>
           <p className="text-xs text-muted-foreground/80 text-pretty">
-            © {year} Harborlight. For educational purposes, not financial
+            © {year} Fairwater. For educational purposes, not financial
             advice.
           </p>
         </div>

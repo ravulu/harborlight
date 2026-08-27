@@ -63,7 +63,7 @@ describe('carrying a register across a sign-in', () => {
   })
 
   it('survives being handed something it cannot parse', () => {
-    window.sessionStorage.setItem('harborlight_register_pending', '{not json')
+    window.sessionStorage.setItem('fairwater_register_pending', '{not json')
     expect(takeStashedPending()).toBeNull()
   })
 })

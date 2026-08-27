@@ -15,7 +15,7 @@ import type { EventName } from '@/lib/events'
  * The same reasoning the session guard already uses for deciding whether a
  * browser run has been vouched for.
  */
-const KEY = 'harborlight_visit'
+const KEY = 'fairwater_visit'
 
 function runId(): string {
   try {
@@ -35,7 +35,7 @@ function runId(): string {
 }
 
 /** Only the first event of a run carries it, so it is the visit's source. */
-const REFERRER_SENT = 'harborlight_visit_ref'
+const REFERRER_SENT = 'fairwater_visit_ref'
 
 function referrerOnce(): string {
   try {

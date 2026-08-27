@@ -20,7 +20,7 @@ export function withDerivedRates(draft: PlanDraft): PlanDraft {
  * localStorage so the server can read it and render the values on first
  * paint — no empty-then-filled flash, and no state sync in an effect.
  */
-export const DRAFT_COOKIE = 'harborlight_draft'
+export const DRAFT_COOKIE = 'fairwater_draft'
 export const DRAFT_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
 
 /**

@@ -6,7 +6,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import { authClient } from '@/lib/auth-client'
 import { clearDraftCookie } from '@/lib/planner-draft'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Anchor, Menu as MenuIcon } from 'lucide-react'
+import { Menu as MenuIcon } from 'lucide-react'
 import { FeedbackDialog } from '@/components/feedback-dialog'
 import {
   Menu,
@@ -115,11 +115,28 @@ export function SiteHeader({ isAuthed }: { isAuthed: boolean }) {
     <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-2 px-4 sm:gap-4">
         <Link href="/" className="flex shrink-0 items-center gap-2">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Anchor className="size-4" />
+          {/* A fairway: two arcs with clear water between them, which is what
+              the name means to anybody navigating. The anchor that was here
+              said the opposite — an anchor is for stopping, and this is a plan
+              about passage. `currentColor` so it takes the tile's own
+              foreground and needs no second asset for dark. */}
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-5"
+              aria-hidden="true"
+            >
+              <path d="M2 3 C5 5.5 5 10.5 2 13" />
+              <path d="M14 3 C11 5.5 11 10.5 14 13" />
+            </svg>
           </span>
           <span className="hidden font-serif text-lg font-medium text-foreground sm:inline">
-            Harborlight
+            Fairwater
           </span>
         </Link>
 

@@ -31,7 +31,7 @@ export default async function AdminLayout({
               <ShieldCheck className="size-4" />
             </span>
             <span className="font-serif text-base font-medium text-foreground">
-              Harborlight admin
+              Fairwater admin
             </span>
           </div>
           <div className="flex items-center gap-4 text-sm text-muted-foreground">

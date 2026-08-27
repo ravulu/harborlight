@@ -12,7 +12,7 @@ import { pageMetadata, appJsonLd } from '@/lib/seo'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = pageMetadata({
-  title: 'Harborlight — Retirement Calculator & Planning',
+  title: 'Fairwater — Retirement Calculator & Planning',
   // Keyword first, because that is what a search snippet is read for — but
   // the clause after the dash is the part no other calculator can claim.
   description:

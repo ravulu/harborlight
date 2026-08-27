@@ -1,4 +1,4 @@
-# Deploying Harborlight on Vercel
+# Deploying Fairwater on Vercel
 
 Written 23 August 2026, against Next 16.
 
@@ -136,7 +136,7 @@ database in one go.
 
 ### The licensing catch
 
-**Vercel's Hobby plan is for non-commercial personal use.** If Harborlight
+**Vercel's Hobby plan is for non-commercial personal use.** If Fairwater
 ever charges, takes sponsorship, or advertises, Hobby is not the right plan and
 Pro starts at $20 per user per month. Render's Starter is $7 and carries no
 such restriction.
@@ -146,7 +146,7 @@ and this file will not.
 
 ### Which to pick
 
-If Harborlight stays free and personal, **Vercel**: better Next support, no
+If Fairwater stays free and personal, **Vercel**: better Next support, no
 cold starts, less to configure, and the URL handling is automatic.
 
 If it becomes a business, price both. Vercel remains the better technical fit;

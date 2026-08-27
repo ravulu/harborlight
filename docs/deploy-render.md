@@ -1,4 +1,4 @@
-# Deploying Harborlight on Render
+# Deploying Fairwater on Render
 
 Written 23 August 2026, against Next 16 and Render's Node runtime.
 
@@ -94,7 +94,7 @@ it. So:
 
 1. Deploy once with `BETTER_AUTH_URL` and `NEXT_PUBLIC_SITE_URL` set to
    anything (the app will build and boot; sign-up will not work yet)
-2. Copy the URL Render assigns — `https://harborlight.onrender.com`, or your
+2. Copy the URL Render assigns — `https://fairwater.onrender.com`, or your
    custom domain if you attach one now
 3. Set both variables to exactly that, with **no trailing slash**
 4. **Trigger a manual deploy — a restart is not enough.** `NEXT_PUBLIC_*` is

@@ -21,7 +21,7 @@ import type { FilingStatus } from '@/lib/state-tax'
  * go does not remove what is already there, and the local one outlives the
  * browser closing.
  */
-const RETIRED_KEY = 'harborlight_holdings'
+const RETIRED_KEY = 'fairwater_holdings'
 
 /**
  * The one moment a signed-out balance sheet is written down.
@@ -35,7 +35,7 @@ const RETIRED_KEY = 'harborlight_holdings'
  * tab closing takes it, so somebody who signs up somewhere else, or wanders
  * off instead, leaves nothing on the machine.
  */
-const STASH_KEY = 'harborlight_register_pending'
+const STASH_KEY = 'fairwater_register_pending'
 
 /**
  * Everything typed while signed out, in one payload.

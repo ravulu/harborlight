@@ -10,7 +10,7 @@
  * rendering and put it straight into the field, with no flash of an empty box
  * and no state set from an effect.
  */
-export const REMEMBERED_EMAIL_COOKIE = 'harborlight_email'
+export const REMEMBERED_EMAIL_COOKIE = 'fairwater_email'
 const MAX_AGE = 60 * 60 * 24 * 365
 
 const secure = () =>

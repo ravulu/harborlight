@@ -1,10 +1,10 @@
-# Harborlight vs Boldin
+# Fairwater vs Boldin
 
 **Updated 27 August 2026.** Third version. Boldin ships
 changes weekly and [their release notes][releases] move faster than this file
 will, so treat every claim about them as true on 23 August — when they were last
 checked against sources — and check before relying on it. Nothing about Boldin
-has been re-verified since; only the Harborlight column has moved. Claims about Harborlight were taken from the code and from
+has been re-verified since; only the Fairwater column has moved. Claims about Fairwater were taken from the code and from
 running it — `lib/rmd.ts`, `lib/irmaa.ts`, `lib/aca.ts`, `lib/conversions.ts`,
 `lib/holdings.ts`, `lib/room.ts` —
 not from memory, and go stale the same way.
@@ -187,7 +187,7 @@ Scored on what each does for the decisions a tax-aware retiree actually makes,
 not on feature counts. **●●●** does it well and shows the working, **●●○** does
 it, **●○○** partial or named without being computed, **○○○** absent.
 
-| | Boldin | Harborlight | |
+| | Boldin | Fairwater | |
 |---|:---:|:---:|---|
 | **Withdrawal tax by account** | ●●○ | ●●● | Gains stacked on ordinary, per year, per state |
 | **Roth conversion decision** | ●●○ | ●●● | Solves the amount against tax, IRMAA *and* the ACA credit together |
@@ -222,7 +222,7 @@ weekly; assume it has moved.
 
 Ranked by how much it matters. This is a shorter list than it was.
 
-| Gap | Boldin | Harborlight |
+| Gap | Boldin | Fairwater |
 |---|---|---|
 | **The balance sheet does not reach the projection** | Joined | **Modelled and taxed, but inert.** A sale's proceeds, a rental's income and a property's upkeep change nothing |
 | **Long-term care** | Modelled | Absent. It is a line in the expense estimator, which is not the same thing |

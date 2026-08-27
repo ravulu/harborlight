@@ -20,7 +20,7 @@ function siteUrl(): string {
 }
 
 export const SITE = {
-  name: 'Harborlight',
+  name: 'Fairwater',
   /**
    * The public origin, used for canonical links, the sitemap and share cards.
    *
@@ -35,7 +35,7 @@ export const SITE = {
    */
   url: siteUrl(),
   /** Shown as the site name on share cards. */
-  publisher: 'Harborlight',
+  publisher: 'Fairwater',
   locale: 'en_US',
 }
 

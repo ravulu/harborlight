@@ -1,4 +1,4 @@
-# Harborlight
+# Fairwater
 
 A retirement and financial planning app. Project your savings, model your
 retirement spending, and see how long your money lasts.
@@ -149,6 +149,6 @@ lib/
 - [Deploying on Render](docs/deploy-render.md) — the environment variables,
   the two that are read at build time rather than run time, and what breaks
   when they are wrong.
-- [How Harborlight compares to Boldin](docs/competitive-boldin.md) — what the
+- [How Fairwater compares to Boldin](docs/competitive-boldin.md) — what the
   app does better, what it does not do at all, and the one gap that makes
   existing advice incomplete rather than merely absent.

@@ -27,8 +27,8 @@ import { authClient } from '@/lib/auth-client'
  * browser restart too, so a close and immediate reopen would look identical to
  * a second tab.
  */
-const MARKER = 'harborlight_run'
-const CHANNEL = 'harborlight_tabs'
+const MARKER = 'fairwater_run'
+const CHANNEL = 'fairwater_tabs'
 /** Long enough for an open tab to answer, short enough not to be felt. */
 const ANSWER_MS = 400
 
