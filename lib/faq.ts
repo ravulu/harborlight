@@ -14,6 +14,22 @@ export interface Qa {
   a: string
 }
 
+/**
+ * What a Monte Carlo run is, in one place.
+ *
+ * Said twice — on the FAQ page, and beside the projection itself where the
+ * band it describes is being looked at — so it is written once. Two copies of
+ * an explanation drift, and the stale one is always the one somebody reads.
+ *
+ * Held as paragraphs because the popover wants them apart; the FAQ joins them
+ * back into the single string its page and its structured data expect.
+ */
+export const MONTE_CARLO_PARAGRAPHS: string[] = [
+  'A single average return hides the thing that decides most retirements: the order the good and bad years arrive in. Planners call it sequence-of-returns risk, and it is why two retirements with identical average returns end very differently when one of them begins with a crash. The same losses in a different order leave a different amount of money, because what a bad year costs depends on how much was in the account when it landed — and the worst place for one is the first few years of drawing down, when the balance is at its largest and every withdrawal sells more of it.',
+  'Harborlight runs 10,000 simulated futures, each with its own random sequence of returns drawn from the return and volatility you set, and reports how many of them your plan survived. That percentage is the confidence figure — the share of runs whose money lasted, not a guarantee about yours.',
+  'Harborlight treats 90% as the bar: above it a plan is marked as holding up, below it the planner offers changes that would reach it, and the retirement age it suggests is the earliest that clears it. That number is a choice rather than a law — some planners use 80%, some 95% — and it is worth knowing which one you are being judged against. At 90%, roughly one simulated market in ten still ran the money out.',
+]
+
 export const FAQ: Qa[] = [
   {
     q: 'When can I retire?',
@@ -29,7 +45,7 @@ export const FAQ: Qa[] = [
   },
   {
     q: 'What is a Monte Carlo retirement simulation, and why use one?',
-    a: 'A single average return hides the thing that decides most retirements: the order the good and bad years arrive in. Two retirements with identical average returns end very differently if one begins with a crash. Harborlight runs 10,000 simulated futures, each with its own random sequence of returns drawn from the return and volatility you set, and reports how many of them your plan survived. That percentage is the confidence figure — the share of runs whose money lasted, not a guarantee about yours. Harborlight treats 90% as the bar: above it a plan is marked as holding up, below it the planner offers changes that would reach it, and the retirement age it suggests is the earliest that clears it. That number is a choice rather than a law — some planners use 80%, some 95% — and it is worth knowing which one you are being judged against. At 90%, roughly one simulated market in ten still ran the money out.',
+    a: MONTE_CARLO_PARAGRAPHS.join(' '),
   },
   {
     q: 'What is a safe withdrawal rate, and does the 4% rule apply to me?',

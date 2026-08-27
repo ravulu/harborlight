@@ -15,85 +15,155 @@ import { Trash2, ArrowRight, CircleCheck, CircleAlert, Plus, Columns3 } from 'lu
 import { PlanCompare, type Computed } from './plan-compare'
 import { cn } from '@/lib/utils'
 
+/**
+ * One figure and what it is, small enough to sit in a row.
+ *
+ * The list used to say it in a sentence — "Retire at 65 · $1.2M projected ·
+ * lasts through 92" — which reads fine for one plan and cannot be scanned down
+ * a column for six. Figures in fixed places can be compared without reading.
+ */
+function Stat({
+  value,
+  label,
+  className,
+}: {
+  value: string
+  label: string
+  className?: string
+}) {
+  return (
+    <div className="flex w-20 shrink-0 flex-col leading-tight">
+      <span className={cn('text-sm font-medium tabular-nums', className)}>
+        {value}
+      </span>
+      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+    </div>
+  )
+}
+
 function PlanRow({
   c,
+  first,
   selected,
   onToggle,
 }: {
   c: Computed
+  /** No rule above the first row: the card's own edge is already there. */
+  first: boolean
   selected: boolean
   onToggle: (id: number) => void
 }) {
   const plan = c.plan
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const result = c.result
-  const lasts = result.lastsThroughRetirement
+  const [confirming, setConfirming] = useState(false)
+  const lasts = c.result.lastsThroughRetirement
+  const confidence = Math.round(c.mc.successRate * 100)
+  const money = formatCurrency(c.mc.balanceAtRetirement.median, { compact: true })
+  const ends = lasts ? `to ${plan.endAge}` : `out at ${c.result.depletionAge}`
 
   return (
-    <Card
+    <div
       className={cn(
-        'p-5 gap-4 transition-colors sm:flex-row sm:items-center sm:justify-between',
-        selected && 'border-primary/40 bg-accent/30',
+        'flex items-center gap-3 px-4 py-3 transition-colors',
+        !first && 'border-t border-border',
+        selected ? 'bg-accent/40' : 'hover:bg-muted/40',
       )}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        {/* The control that puts a plan in the comparison. Labelled by name so
-            a screen reader says which plan it is picking. */}
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={() => onToggle(plan.id)}
-          aria-label={`Compare ${plan.name}`}
-          className="size-4 shrink-0 cursor-pointer accent-primary"
+      {/* Labelled by name, so a screen reader says which plan it is picking. */}
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={() => onToggle(plan.id)}
+        aria-label={`Compare ${plan.name}`}
+        className="size-4 shrink-0 cursor-pointer accent-primary"
+      />
+
+      <span className={cn('shrink-0', lasts ? 'text-primary' : 'text-destructive')}>
+        {lasts ? (
+          <CircleCheck className="size-4" />
+        ) : (
+          <CircleAlert className="size-4" />
+        )}
+      </span>
+
+      <div className="flex min-w-0 flex-1 flex-col leading-tight">
+        <span className="truncate font-medium text-foreground">{plan.name}</span>
+        {/* The same figures as a sentence, for a screen too narrow to column
+            them. Below `lg` the four stats are hidden rather than wrapped:
+            a row that wraps stops being a row. */}
+        <span className="truncate text-xs text-muted-foreground lg:hidden">
+          {confidence}% · retires {plan.retirementAge} · {money} · lasts {ends}
+        </span>
+      </div>
+
+      <div className="hidden items-center gap-4 lg:flex">
+        <Stat
+          value={`${confidence}%`}
+          label="Confidence"
+          className={confidence >= 90 ? 'text-primary' : undefined}
         />
-      <div className="flex min-w-0 flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <span className={lasts ? 'text-primary' : 'text-destructive'}>
-            {lasts ? (
-              <CircleCheck className="size-4" />
-            ) : (
-              <CircleAlert className="size-4" />
-            )}
-          </span>
-          <h3 className="font-medium text-foreground">{plan.name}</h3>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Retire at {plan.retirementAge} ·{' '}
-          {formatCurrency(c.mc.balanceAtRetirement.median, { compact: true })} projected ·{' '}
-          {lasts ? `lasts through ${plan.endAge}` : `runs out at ${result.depletionAge}`}
-        </p>
+        <Stat value={String(plan.retirementAge)} label="Retires" />
+        {/* "Projected", not "At retirement": thirteen letter-spaced characters
+            do not fit the column, and the sentence this replaced called it
+            projected too. */}
+        <Stat value={money} label="Projected" />
+        <Stat
+          value={ends}
+          label="Lasts"
+          className={lasts ? undefined : 'text-destructive'}
+        />
       </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <Link
-          href={`/planner?plan=${plan.id}`}
-          className={buttonVariants({
-            size: 'lg',
-            className:
-              'group gap-1.5 px-4 shadow-sm transition-transform hover:-translate-y-px',
-          })}
-        >
-          Open
-          <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-        </Link>
+
+      <Link
+        href={`/planner?plan=${plan.id}`}
+        className={buttonVariants({
+          size: 'lg',
+          variant: 'outline',
+          className: 'group shrink-0 gap-1.5',
+        })}
+      >
+        Open
+        <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+      </Link>
+
+      {/* Two presses, not one. Plans have gone missing from this account before
+          and nothing in the code could account for it; a delete that happens on
+          the first click of a small icon beside an Open button is at least a
+          candidate. Asking costs a second and rules it out. */}
+      {confirming ? (
+        <span className="flex shrink-0 items-center gap-1">
+          <Button
+            size="sm"
+            variant="destructive"
+            disabled={pending}
+            onClick={() =>
+              startTransition(async () => {
+                await deletePlan(plan.id)
+                router.refresh()
+              })
+            }
+          >
+            Delete
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+            No
+          </Button>
+        </span>
+      ) : (
         <Button
           variant="ghost"
           size="icon-lg"
-          className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
           aria-label={`Delete ${plan.name}`}
-          disabled={pending}
-          onClick={() =>
-            startTransition(async () => {
-              await deletePlan(plan.id)
-              router.refresh()
-            })
-          }
+          onClick={() => setConfirming(true)}
         >
           <Trash2 className="size-4" />
         </Button>
-      </div>
-    </Card>
+      )}
+    </div>
   )
 }
 
@@ -181,10 +251,16 @@ export function SavedPlans({ plans }: { plans: RetirementPlan[] }) {
           </div>
         </div>
       )}
-      {computed.map((c) => (
+      {/* One card, ruled between rows, rather than a card each. Six plans meant
+          six borders and six lots of padding for six lines of text, and the
+          figures never lined up with each other because every card sized
+          itself. */}
+      <Card className="gap-0 overflow-hidden p-0">
+      {computed.map((c, i) => (
         <PlanRow
           key={c.plan.id}
           c={c}
+          first={i === 0}
           selected={picked.includes(c.plan.id)}
           onToggle={(id) => {
             toggle(id)
@@ -193,6 +269,7 @@ export function SavedPlans({ plans }: { plans: RetirementPlan[] }) {
           }}
         />
       ))}
+      </Card>
     </div>
   )
 }

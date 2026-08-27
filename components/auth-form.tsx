@@ -10,6 +10,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
+import { Check, Circle } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import {
+  PASSWORD_MIN,
+  PASSWORD_RULES,
+  passwordProblem,
+} from '@/lib/password'
 
 export function AuthForm({
   mode,
@@ -43,6 +50,15 @@ export function AuthForm({
     setLoading(true)
 
     if (isSignUp) {
+      // Checked here as well as on the server, to save a round trip and to
+      // say the same sentence the server would. The server is the one that
+      // decides; this is the one that is quick about it.
+      const problem = passwordProblem(password)
+      if (problem) {
+        setLoading(false)
+        setError(problem)
+        return
+      }
       const { error: signUpError } = await authClient.signUp.email({
         email,
         password,
@@ -144,9 +160,15 @@ export function AuthForm({
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            minLength={8}
+            minLength={PASSWORD_MIN}
+            aria-describedby={isSignUp ? 'passwordRules' : undefined}
             autoComplete={isSignUp ? 'new-password' : 'current-password'}
           />
+          {/* Only when making one. Signing in, the rules are not the reader's
+              problem — their password either is the one on the account or it
+              is not, and a checklist beside it would be telling them their own
+              password is wrong. */}
+          {isSignUp && <PasswordRules password={password} />}
         </div>
 
         <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
@@ -193,5 +215,43 @@ export function AuthForm({
         </Link>
       </p>
     </Card>
+  )
+}
+
+/**
+ * The rules, ticked off as they are met.
+ *
+ * Shown from the first keystroke rather than after a rejected submit. Someone
+ * choosing a password is deciding what to type; telling them the rules once
+ * they have finished is telling them to start again.
+ *
+ * `aria-live` is deliberately off: the list is tied to the field by
+ * `aria-describedby`, and a screen reader announcing four rules on every
+ * keystroke would make the field unusable. It is read on focus, which is when
+ * it matters.
+ */
+function PasswordRules({ password }: { password: string }) {
+  return (
+    <ul id="passwordRules" className="flex flex-col gap-1 pt-0.5">
+      {PASSWORD_RULES.map((rule) => {
+        const met = rule.met(password)
+        return (
+          <li
+            key={rule.id}
+            className={cn(
+              'flex items-center gap-1.5 text-xs transition-colors',
+              met ? 'text-primary' : 'text-muted-foreground',
+            )}
+          >
+            {met ? (
+              <Check className="size-3.5 shrink-0" />
+            ) : (
+              <Circle className="size-3.5 shrink-0 opacity-40" />
+            )}
+            {rule.label}
+          </li>
+        )
+      })}
+    </ul>
   )
 }

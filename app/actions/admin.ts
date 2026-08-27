@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { retirementPlans, user, feedback, events } from '@/lib/db/schema'
 import { and, countDistinct, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm'
 
-import { tabLabel } from '@/lib/planner-tabs'
+import { isSectionPath, tabLabel } from '@/lib/planner-tabs'
 import { requireAdmin } from '@/lib/admin'
 
 const LIMIT = 200
@@ -195,6 +195,8 @@ export interface UsageSummary {
    * this list was never switched to, which is the finding.
    */
   tabs: { label: string; visits: number }[]
+  /** The two top-level tabs: the plan, and the register beside it. */
+  sections: { label: string; visits: number }[]
   /**
    * The last few visits, each with what it did, in order.
    *
@@ -321,13 +323,25 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
     .where(and(window, eq(events.name, 'tab_viewed')))
     .groupBy(events.path)
 
+  // Counted apart: "did anybody open the register" and "did anybody read the
+  // tax view" are different findings, and one list would rank them against
+  // each other as though they competed.
   const tabs = tabRows
+    .filter((r) => !isSectionPath(r.path))
+    .map((r) => ({ label: tabLabel(r.path), visits: r.visits }))
+    .sort((a, b) => b.visits - a.visits)
+
+  const sections = tabRows
+    .filter((r) => isSectionPath(r.path))
     .map((r) => ({ label: tabLabel(r.path), visits: r.visits }))
     .sort((a, b) => b.visits - a.visits)
 
   // The most recent visits first, then everything each of them did. Two
   // queries rather than one: a limit on events would cut a visit in half and
   // show a visit that landed but apparently never left the page.
+  // Newest first, by last activity rather than by when a visit began: a visit
+  // still going is more recent than one that finished an hour ago, whenever it
+  // started. The list shows the same figure it is sorted by.
   const latest = await db
     .select({ session: events.session, last: sql<Date>`max(${events.createdAt})` })
     .from(events)
@@ -382,6 +396,7 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
     pages,
     places,
     tabs,
+    sections,
     recentSessions,
   }
 }

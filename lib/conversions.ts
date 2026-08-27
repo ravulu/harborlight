@@ -3,7 +3,7 @@ import { simulate } from '@/lib/retirement'
 import { runMonteCarlo } from '@/lib/monte-carlo'
 import { rmdAge } from '@/lib/rmd'
 import { PENALTY_FREE_AGE } from '@/lib/tax'
-import { CLIFF, MEDICARE_AGE, acaCost, acaMagiOf, povertyLine } from '@/lib/aca'
+import { CLIFF, MEDICARE_AGE, acaCost, policyAges, povertyLine } from '@/lib/aca'
 
 /** Enough runs to rank options; the headline figure is still the full run. */
 const PROBE_RUNS = 800
@@ -137,9 +137,16 @@ export interface ConversionComparison {
   /** whether the saving is large enough to be worth acting on */
   worthwhile: boolean
   /**
-   * Whether the window opens before Medicare does — and so whether the
-   * health-cover column above means anything at all. A window that opens at 65
-   * costs nothing in premiums, because Medicare has started.
+   * Whether the health-cover figures above mean anything at all.
+   *
+   * Two conditions, not one. The window has to open before Medicare does — a
+   * window opening at 65 costs nothing in premiums because Medicare has
+   * started — and the household has to be buying cover on the marketplace.
+   *
+   * It was the age alone, which was right while these premiums were priced
+   * from the ages regardless of the setting. Now that they are read off the
+   * projection, a household covered by an employer plan has no premiums to
+   * report, and the age alone would gate four columns of zeroes into view.
    */
   beforeMedicare: boolean
   /** One or two, which is what the poverty line is measured against. */
@@ -193,17 +200,39 @@ export function compareConversions(inputs: PlanInputs): ConversionComparison | n
     conversionToAge: toAge,
   })
 
-  const householdSize = inputs.filingStatus === 'married' ? 2 : 1
+  /**
+   * How many are on the policy when the window opens.
+   *
+   * One figure for a comparison that spans twenty years, and it is the right
+   * one to quote: it is the earliest years that buy marketplace cover, and any
+   * children are still on the policy then. As they reach 26 the line drops
+   * back towards the couple's own — the year-by-year table shows that; this
+   * card quotes where it starts.
+   */
+  const householdSize = policyAges(
+    fromAge,
+    inputs.filingStatus === 'married',
+    inputs.dependentBirthYears,
+    thisYear + (fromAge - inputs.currentAge),
+  ).length
 
   /**
    * What marketplace cover costs across the pre-Medicare years of a plan.
    *
-   * Priced here rather than charged inside the projection on purpose. The
-   * premium is ordinary spending, and someone who has entered a monthly
-   * retirement figure has very likely counted it already — charging it again
-   * would bill it twice. What is wanted is the difference between one choice
-   * and another, and a difference is the same whether or not both sides also
-   * carry a cost the reader has budgeted for elsewhere.
+   * Read off the projection's own rows rather than priced again here.
+   *
+   * It used to be priced again here, on the reasoning that the premium was
+   * ordinary spending the reader had probably budgeted for, so charging it
+   * inside the projection too would bill it twice. The health-cover work then
+   * made the projection charge it, and this was left recomputing the same
+   * figure from the same inputs — agreeing to a fraction of a percent, held
+   * together by nothing, and free to drift apart on the next change to either.
+   *
+   * Worse, it read the ages and not the setting. A household that had told us
+   * they were covered by an employer plan was still shown tens of thousands of
+   * marketplace premiums in this comparison, while the projection beside it
+   * charged nothing. Reading the rows fixes that by construction: the
+   * projection only fills them in for a household actually buying cover.
    */
   const acaAcross = (rows: ReturnType<typeof simulate>['rows']) => {
     let total = 0
@@ -213,11 +242,11 @@ export function compareConversions(inputs: PlanInputs): ConversionComparison | n
     let crossesCliff = false
     for (const row of rows) {
       if (row.phase !== 'retirement' || row.age >= MEDICARE_AGE) continue
-      const cost = acaCost(acaMagiOf(row), row.age, householdSize)
-      total += cost.net
-      subsidy += cost.subsidy
+      if (inputs.healthCoverBefore65 !== 'marketplace') continue
+      total += row.healthPremium
+      subsidy += row.healthSubsidy
       years += 1
-      if (cost.overCliff) {
+      if (row.healthOverCliff) {
         crossesCliff = true
         cliffYears += 1
       }
@@ -337,7 +366,8 @@ export function compareConversions(inputs: PlanInputs): ConversionComparison | n
     acaSaving,
     rmdReduction: Math.max(0, none.firstRmd - best.firstRmd),
     worthwhile: best.annual > 0 && taxSaving + irmaaSaving + acaSaving > 5_000,
-    beforeMedicare: fromAge < MEDICARE_AGE,
+    beforeMedicare:
+      fromAge < MEDICARE_AGE && inputs.healthCoverBefore65 === 'marketplace',
     householdSize,
     // The whole benchmark premium, which is exactly what is lost by crossing.
     cliffCost: acaCost(

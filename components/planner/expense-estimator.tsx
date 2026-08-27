@@ -228,6 +228,9 @@ export function ExpenseEstimator({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
+          // A link rather than a button. It sits over the box it fills in,
+          // where its position says what it is for, so it does not need the
+          // weight of a control competing with the box itself.
           <button
             type="button"
             className="inline-flex w-fit items-center gap-1.5 rounded-sm text-xs font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"

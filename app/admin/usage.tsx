@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { adminDay, adminTimeOnly, adminZoneLabel } from '@/lib/time'
-import { PLANNER_TABS } from '@/lib/planner-tabs'
+import { PLANNER_TABS, WORKSPACE_TABS } from '@/lib/planner-tabs'
 
 function isoDay(d: Date) {
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -227,7 +227,23 @@ export function Usage() {
             </div>
           )}
 
-          <Tabs tabs={data.tabs} of={data.steps.find((s) => s.name === 'plan_completed')?.visits ?? 0} />
+          <Opened
+            title="Sections opened"
+            note="of everyone who reached the planner"
+            all={WORKSPACE_TABS.map((t) => t.label)}
+            counts={data.sections}
+            of={data.steps.find((s) => s.name === 'page_view')?.visits ?? 0}
+            footnote="The retirement plan opens by default, so its count is people who went away and came back."
+          />
+
+          <Opened
+            title="Tabs opened"
+            note="of everyone who saw a projection"
+            all={PLANNER_TABS.map((t) => t.label)}
+            counts={data.tabs}
+            of={data.steps.find((s) => s.name === 'plan_completed')?.visits ?? 0}
+            footnote="Balance is the tab that opens by default, so its count is people who went away and came back — not people who saw it."
+          />
 
           {data.recentSessions.length > 0 && (
             <Visits sessions={data.recentSessions} />
@@ -239,43 +255,46 @@ export function Usage() {
 }
 
 /**
- * Which of the result tabs anybody opened, out of those who saw a projection.
+ * How many people opened a thing, out of the people who could have.
  *
- * Measured against the projection rather than against all visits, because a
- * tab cannot be opened by someone who never got one — dividing by everybody
- * would report the funnel again under a different name.
- *
- * Every tab is listed, including the ones nobody opened. A tab absent from a
- * chart reads as an oversight; a tab showing zero reads as an answer, and it
- * is the more useful of the two.
+ * Shared by the two levels of tab, because they ask the same shape of
+ * question and a reader should not have to learn two charts. Every entry is
+ * listed including the ones nobody opened: an absent row reads as an
+ * oversight, a zero reads as an answer, and the zero is the more useful of
+ * the two.
  */
-function Tabs({
-  tabs,
+function Opened({
+  title,
+  note,
+  all,
+  counts,
   of,
+  footnote,
 }: {
-  tabs: UsageSummary['tabs']
+  title: string
+  note: string
+  all: readonly string[]
+  counts: { label: string; visits: number }[]
   of: number
+  footnote: string
 }) {
-  const seen = new Map(tabs.map((t) => [t.label, t.visits]))
-  const rows = PLANNER_TABS.map((t) => ({
-    label: t.label,
-    visits: seen.get(t.label) ?? 0,
-  }))
+  const seen = new Map(counts.map((t) => [t.label, t.visits]))
+  const rows = all.map((label) => ({ label, visits: seen.get(label) ?? 0 }))
   const most = Math.max(1, ...rows.map((r) => r.visits))
 
   return (
     <div className="border-t border-border pt-4">
       <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-        Tabs opened{' '}
+        {title}{' '}
         <span className="normal-case tracking-normal text-muted-foreground/70">
-          · of {of.toLocaleString()} who saw a projection, switches only
+          · {note.replace('of everyone', `of ${of.toLocaleString()}`)}, switches only
         </span>
       </p>
 
       <ul className="mt-2 flex flex-col gap-1.5">
         {rows.map((r) => (
           <li key={r.label} className="flex items-center gap-3 text-sm">
-            <span className="w-28 shrink-0 text-foreground">{r.label}</span>
+            <span className="w-32 shrink-0 truncate text-foreground">{r.label}</span>
             <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
               <span
                 className="block h-full rounded-full bg-primary/70"
@@ -288,11 +307,8 @@ function Tabs({
           </li>
         ))}
       </ul>
-      {/* The first tab is shown without a click, so a low count against it
-          means people stayed on it rather than that they avoided it. */}
       <p className="mt-1.5 text-[11px] text-muted-foreground/70 text-pretty">
-        Balance is the tab that opens by default, so its count is people who
-        went away and came back — not people who saw it.
+        {footnote}
       </p>
     </div>
   )
@@ -341,8 +357,13 @@ function Visits({ sessions }: { sessions: UsageSummary['recentSessions'] }) {
                     </span>
                   )}
                 </span>
+                {/* Sorted by last activity, so that is what is shown. Showing
+                    only the start time made a long visit sit above a later
+                    short one and read as unsorted. */}
                 <span className="truncate text-xs text-muted-foreground">
-                  {adminDay(v.startedAt)} · {adminTimeOnly(v.startedAt)}
+                  {adminDay(v.endedAt)} · {adminTimeOnly(v.endedAt)}
+                  {+v.endedAt - +v.startedAt > 60_000 &&
+                    `, over ${Math.round((+v.endedAt - +v.startedAt) / 60_000)} min`}
                   {v.place ? ` · ${v.place}` : ''}
                   {v.referrer ? ` · from ${v.referrer}` : ''}
                 </span>

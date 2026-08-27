@@ -22,6 +22,7 @@ import {
 } from '@/lib/retirement'
 import {
   clearDraftCookie,
+  withDerivedRates,
   writeDraftCookie,
   type StoredDraft,
 } from '@/lib/planner-draft'
@@ -29,7 +30,13 @@ import { runMonteCarlo } from '@/lib/monte-carlo'
 import type { MonteCarloResult } from '@/lib/monte-carlo'
 import { compareClaimAges, suggestFixes, TARGET_CONFIDENCE } from '@/lib/suggestions'
 import { savePlan, updatePlan } from '@/app/actions/plans'
-import { PlanInputsPanel } from './plan-inputs'
+import { savePlanRegister } from '@/app/actions/balance-sheet'
+import { stashPending } from '@/lib/holdings-store'
+import { PlanInputsPanel, ClearingInput } from './plan-inputs'
+import { Label } from '@/components/ui/label'
+import { createPortal } from 'react-dom'
+import { planDiffers, registerDiffers } from '@/lib/plan'
+import { EMPTY_REGISTER } from '@/lib/balance-sheet'
 import { PlanSummary } from './plan-summary'
 import { ProjectionChart } from './projection-chart'
 import { IncomeChart } from './income-chart'
@@ -58,6 +65,7 @@ import { WhatsStillOpen } from '@/components/planner/whats-still-open'
 import { SpendingLever } from '@/components/planner/spending-lever'
 import { spendingLeverage } from '@/lib/spending-lever'
 import { compareConversions, type ConversionComparison } from '@/lib/conversions'
+import { roomByYear } from '@/lib/room'
 import { record } from '@/lib/usage'
 import { earliestRetirement } from '@/lib/earliest'
 import {
@@ -71,6 +79,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSettled } from '@/lib/use-settled'
+import type { HouseholdFacts, Register } from '@/lib/balance-sheet'
 
 // Only the two the projection cannot start without are named here; the rest
 // count as none when blank, so they are never asked for.
@@ -90,6 +99,68 @@ interface RetirementPlannerProps {
   initialDraft?: StoredDraft | null
   /** Set by ?save=1, the flag "Sign in to save" leaves behind. */
   saveOnArrival?: boolean
+  /**
+   * What the plan's balances add up to, reported as they change.
+   *
+   * So the net-worth bar above both tabs can move while somebody types,
+   * without the balances leaving the plan that owns them. Reported from the
+   * settled draft rather than the raw one, so it follows the same beat as
+   * everything else expensive here.
+   */
+  onLiquidChange?: (total: number) => void
+  /** Ordinary income by age, so a sale can be priced against the right year. */
+  onIncomeByAge?: (byAge: Map<number, number>) => void
+  /**
+   * Who the household is, from above the tabs.
+   *
+   * Age, filing status and state used to be asked here and on the balance
+   * sheet, so the two could disagree. They are asked once now, and a saved
+   * plan takes them from the household rather than from whenever it was
+   * saved — which also stops a plan projecting from an age its owner has
+   * long since passed.
+   */
+  household?: HouseholdFacts
+  /**
+   * What this plan assumes the household owns and owes.
+   *
+   * Passed in so saving the plan saves both tabs at once. A register without a
+   * plan is not a scenario, so it has no save of its own.
+   */
+  register?: Register
+  /** What that register held when the plan was opened, to compare against. */
+  initialRegister?: Register | null
+  /**
+   * Where to put the plan's name and Save button.
+   *
+   * Above the tabs, which is outside this component's tree — one press keeps
+   * this plan and the register beside it, so the control cannot live inside
+   * one of the two things it saves. Only the DOM moves; the name and the save
+   * handler stay where they already were.
+   */
+  headerSlot?: HTMLElement | null
+  /** Where the save row lands, below both tabs so either can reach it. */
+  footerSlot?: HTMLElement | null
+  /**
+   * Whether this tab is the one on screen.
+   *
+   * Both tabs stay mounted, so the draft survives switching between them. A
+   * hidden panel has no width, though, and a chart asked to draw into nothing
+   * warns about it — so the charts are the one thing that waits until it is
+   * being looked at. Everything else, including every figure they are drawn
+   * from, stays exactly where it was.
+   */
+  active?: boolean
+  /** Set once the register carried across a sign-in has been taken up. */
+  autoSaveReady?: boolean
+  /**
+   * Which tab is showing, so the sign-in comes back to it.
+   *
+   * Somebody who pressed Save from their balance sheet did not ask to be
+   * returned to the projection. It travels in the URL rather than in storage
+   * so the right tab is server-rendered and there is no flash of the wrong
+   * one on arrival.
+   */
+  activeTab?: string
 }
 
 export function RetirementPlanner({
@@ -100,6 +171,16 @@ export function RetirementPlanner({
   planId,
   initialDraft,
   saveOnArrival = false,
+  onLiquidChange,
+  onIncomeByAge,
+  household,
+  register,
+  initialRegister,
+  headerSlot,
+  footerSlot,
+  active = true,
+  autoSaveReady = true,
+  activeTab,
 }: RetirementPlannerProps) {
   const router = useRouter()
   const editingSaved = planId !== undefined
@@ -121,6 +202,8 @@ export function RetirementPlanner({
   )
   const [pending, startTransition] = useTransition()
   const [saved, setSaved] = useState(false)
+  /** Shown beside the button. A save that fails quietly is worse than one that fails. */
+  const [error, setError] = useState<string | null>(null)
 
   /**
    * Follow the URL when a different saved plan is opened.
@@ -190,6 +273,13 @@ export function RetirementPlanner({
     [inputs],
   )
 
+  /**
+   * The low-income window, worked out here rather than in the tab that shows
+   * it. It runs the projection to get there, and a component that re-renders
+   * on every keystroke is the wrong place to do that.
+   */
+  const room = useMemo(() => (inputs ? roomByYear(inputs) : null), [inputs])
+
   const conversions = useMemo(
     () => (inputs ? compareConversions(inputs) : null),
     [inputs],
@@ -211,7 +301,114 @@ export function RetirementPlanner({
   // Worth showing whether the plan is short or not: a healthy plan can still
   // be leaving a permanently larger benefit on the table.
   const claiming = useMemo(() => (inputs ? compareClaimAges(inputs) : null), [inputs])
+  // The household is the truth for these three. Applied on the way in rather
+  // than merged at the end, so everything downstream — the projection, the
+  // save, the compare — sees one answer.
+  useEffect(() => {
+    if (!household) return
+    // An unset household says nothing, so it should not say zero. Arriving
+    // from a sign-in the account's household is blank for a moment, and
+    // applying it would wipe the age the draft cookie had just carried
+    // across — the one figure the projection cannot start without.
+    const unset =
+      household.currentAge === 0 && !household.taxState && !household.name
+    if (unset) return
+    setDraft((d) =>
+      d.currentAge === household.currentAge &&
+      d.filingStatus === household.filingStatus &&
+      d.taxState === household.taxState
+        ? d
+        : withDerivedRates({
+            ...d,
+            currentAge: household.currentAge,
+            filingStatus: household.filingStatus,
+            taxState: household.taxState,
+          }),
+    )
+  }, [household])
+
   const missing = missingRequired(settledDraft)
+
+  /**
+   * Whether pressing Save would write anything different.
+   *
+   * Compared against what the plan loaded with rather than flagged on the
+   * first keystroke: the household's age and state are copied into the draft
+   * by an effect on the way in, so a plan nobody had touched would otherwise
+   * announce itself unsaved before the reader had done anything. Comparing
+   * also lets it go quiet again when a change is undone.
+   *
+   * An unsaved plan is always worth keeping, so it counts as changed from the
+   * moment it has enough in it to store.
+   */
+  const changed = useMemo(() => {
+    if (!inputs) return false
+    if (!editingSaved) return true
+    return (
+      planDiffers(inputs, initialInputs ?? null) ||
+      name !== (initialName ?? '') ||
+      personName !== (initialPersonName ?? '') ||
+      registerDiffers(register ?? EMPTY_REGISTER, initialRegister ?? EMPTY_REGISTER)
+    )
+  }, [
+    inputs,
+    editingSaved,
+    initialInputs,
+    name,
+    initialName,
+    personName,
+    initialPersonName,
+    register,
+    initialRegister,
+  ])
+
+
+
+  /**
+   * The balances, as one figure, whenever they move.
+   *
+   * Only the five pots the plan draws on — anything illiquid lives in the
+   * register instead, which is what keeps the total above from counting a
+   * retirement account twice.
+   */
+  const liquid =
+    (settledDraft.brokerageBalance ?? 0) +
+    (settledDraft.balance401k ?? 0) +
+    (settledDraft.traditionalIraBalance ?? 0) +
+    (settledDraft.rothIraBalance ?? 0) +
+    (settledDraft.hsaBalance ?? 0)
+
+  /**
+   * What the plan earns in ordinary income, year by year.
+   *
+   * The register needs it to price a sale: a gain has no rate of its own and
+   * is charged at whatever band it reaches on top of everything else that
+   * year. It used to be a box on the household — one figure for every sale,
+   * which is wrong as soon as there are two at different ages, and a guess
+   * even when there is one. The projection already knows.
+   *
+   * Ordinary income only. Capital gains from the plan's own drawdown stack
+   * beside the sale rather than under it, so counting them here would charge
+   * the same dollars twice.
+   */
+  const ordinaryByAge = useMemo(() => {
+    const map = new Map<number, number>()
+    for (const r of result?.rows ?? []) {
+      map.set(
+        r.age,
+        r.fromDeferred + r.conversion + r.otherIncome + r.taxableSocialSecurity,
+      )
+    }
+    return map
+  }, [result])
+
+  useEffect(() => {
+    onLiquidChange?.(liquid)
+  }, [liquid, onLiquidChange])
+
+  useEffect(() => {
+    onIncomeByAge?.(ordinaryByAge)
+  }, [ordinaryByAge, onIncomeByAge])
 
   useEffect(() => {
     if (result) record('plan_completed', undefined, true)
@@ -220,20 +417,50 @@ export function RetirementPlanner({
   const persist = useCallback(
     (plan: PlanInputs) => {
       startTransition(async () => {
-        if (planId) {
-          await updatePlan(planId, name, personName, plan)
-        } else {
-          await savePlan(name, personName, plan)
+        // One save, both tabs. What a plan assumes it owns and owes is part of
+        // the scenario rather than a separate record — keeping the rental and
+        // selling it are two plans, and neither should overwrite the other.
+        //
+        // Wrapped, because it was not: a throw inside a transition goes
+        // nowhere, so a half-completed save looked exactly like a working one.
+        // The plan would store and the register would not, and the only sign
+        // was that the button never said "Saved".
+        try {
+          let id = planId
+          if (id) {
+            await updatePlan(id, name, personName, plan)
+          } else {
+            const row = await savePlan(name, personName, plan)
+            id = row?.id
+          }
+          if (!id) throw new Error('The plan was not stored, so there was nothing to attach to.')
+          await savePlanRegister(id, register ?? { holdings: [], liabilities: [] })
+
+          // The plan is stored now, so the draft has served its purpose.
+          clearDraftCookie()
+          record('plan_saved')
+          setError(null)
+          setSaved(true)
+          setTimeout(() => setSaved(false), 2000)
+          // Carry the id in the URL so the next press updates this plan rather
+          // than making another, and so a reload comes back to it.
+          if (!planId && id) {
+            // Keeps the tab: replacing the URL without it would move somebody
+            // off the balance sheet at the moment they saved it.
+            const keep = activeTab && activeTab !== 'plan' ? `&tab=${activeTab}` : ''
+            router.replace(`/planner?plan=${id}${keep}`)
+          }
+          router.refresh()
+        } catch (e) {
+          setError(
+            e instanceof Error && e.message
+              ? e.message
+              : 'Could not save. Your figures are still here — try again.',
+          )
         }
-        // The plan is stored now, so the draft has served its purpose.
-        clearDraftCookie()
-        record('plan_saved')
-        setSaved(true)
-        setTimeout(() => setSaved(false), 2000)
-        router.refresh()
       })
     },
-    [planId, name, personName, router],
+    [planId, name, personName, register, router],
   )
 
   const [copied, setCopied] = useState(false)
@@ -247,6 +474,8 @@ export function RetirementPlanner({
       typed && typed !== (initialName ?? '').trim() ? typed : `${typed || 'Plan'} copy`
     startTransition(async () => {
       const row = await savePlan(fresh, personName, inputs)
+      // A copy of a plan is a copy of what it assumed, or it is not a copy.
+      if (row?.id && register) await savePlanRegister(row.id, register)
       clearDraftCookie()
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
@@ -258,95 +487,238 @@ export function RetirementPlanner({
 
   const handleSave = () => {
     if (!isAuthed) {
-      // Keep the work. The draft is written here rather than on every
-      // keystroke: someone signed out has asked for nothing until they press
-      // this, and pressing it is exactly the moment their figures are worth
-      // carrying across a sign-in.
+      // Keep the work. Written here rather than on every keystroke: someone
+      // signed out has asked for nothing until they press this, and pressing
+      // it is exactly the moment their figures are worth carrying across a
+      // sign-in.
+      //
+      // Both halves travel, or only half of them arrives. The plan goes in its
+      // cookie and the register beside it — a redirect is a new page, and
+      // state that lived only in a component does not survive one.
       writeDraftCookie({ draft, name, personName })
-      router.push(`/sign-in?next=${encodeURIComponent('/planner?save=1')}`)
+      stashPending({
+        household,
+        register: register ?? { holdings: [], liabilities: [] },
+      })
+      const back = activeTab && activeTab !== 'plan'
+        ? `/planner?save=1&tab=${activeTab}`
+        : '/planner?save=1'
+      router.push(`/sign-in?next=${encodeURIComponent(back)}`)
       return
     }
+
     if (!inputs) return
     persist(inputs)
   }
+
+  /**
+   * The shortcut people press without being told about it.
+   *
+   * Bound to the same handler as both buttons, so there is one save and three
+   * ways to ask for it. The browser's own Save-page dialog is suppressed —
+   * nobody pressing this on a form means to file the HTML.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 's' || !(e.metaKey || e.ctrlKey)) return
+      e.preventDefault()
+      if (changed && !pending) handleSave()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
 
   // Coming back from that sign-in, with the draft restored by the server.
   // "Sign in to save" promised a save, so it saves rather than leaving them
   // looking at their own figures wondering whether it worked.
   const autoSaved = useRef(false)
   useEffect(() => {
-    if (!saveOnArrival || !isAuthed || autoSaved.current || !inputs) return
+    // Waits for the register to be adopted from the stash. Child effects run
+    // before their parent's, so without this the arrival save would fire first
+    // and store an empty register — then mark itself done, and the figures
+    // that had just been carried across would never be written.
+    if (!saveOnArrival || !isAuthed || !autoSaveReady || autoSaved.current || !inputs)
+      return
     autoSaved.current = true
     persist(inputs)
     // Drop the flag so a reload does not save the plan a second time.
     router.replace('/planner')
-  }, [saveOnArrival, isAuthed, inputs, persist, router])
+  }, [saveOnArrival, isAuthed, autoSaveReady, inputs, persist, router])
 
+  /**
+   * The plan's name and the button that keeps it.
+   *
+   * Rendered here, where the name and the save handler already live, and put
+   * above the tabs by a portal. One press stores this plan and the register
+   * beside it, so the control cannot sit inside one of the two things it
+   * saves — the DOM has to move even though the state does not.
+   */
+  const planHeader = (
+    <div
+      className={cn(
+        // gap-1 like the household's own fields, so the two labels sit the
+        // same distance above their boxes and the boxes land on one line.
+        'flex flex-col gap-1',
+        // Slotted it is a column of the household tile, with its heading level
+        // with that tile's own. Standing on its own — which it does for the one
+        // render before the slot's ref attaches — it still needs a frame.
+        !headerSlot && 'rounded-xl bg-card p-5 ring-1 ring-foreground/10',
+      )}
+    >
+      {/* Set as a field label, not a heading. It names a box exactly as "Name"
+          does on the other side of the tile, and the two read as one row of
+          fields only if they are lettered the same.
+
+          "Plan name", not "This plan": beside a box holding the household's
+          name, a label saying "this plan" named the thing the box belonged to
+          rather than what went in it. Both labels now say what to type. */}
+      <Label htmlFor="planName" className="text-xs text-muted-foreground">
+        Plan name
+      </Label>
+      {/* The box and the buttons on one line. The box had a column of its own
+          beside them, which put it a row above the button that saves what is
+          in it. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <ClearingInput
+          id="planName"
+          value={name}
+          onValueChange={setName}
+          placeholder="Name this plan"
+          maxLength={120}
+          className="h-9 w-full min-w-0 flex-1 sm:w-44 sm:flex-none"
+        />
+        <Button
+          size="lg"
+          onClick={handleSave}
+          disabled={pending || (isAuthed && !inputs)}
+          className="gap-2 px-4 shadow-sm"
+        >
+          {saved ? (
+            <>
+              <Check className="size-4" /> Saved
+            </>
+          ) : (
+            <>
+              <Save className="size-4" />
+              {/* Named, because it is not the only thing being saved.
+                  The balance sheet writes itself as it is typed; this
+                  button keeps a version of the plan. "Save" alone read
+                  as though nothing else was being kept. */}
+              {isAuthed
+                ? planId
+                  ? 'Update plan'
+                  : 'Save plan'
+                : 'Sign in to save'}
+            </>
+          )}
+        </Button>
+        {/* Only once there is something to copy. On an unsaved plan the
+            Save button already makes the new one. */}
+        {editingSaved && (
+          <Button
+            size="lg"
+            variant="outline"
+            onClick={saveAsNew}
+            disabled={pending || !inputs}
+            className="gap-2 px-3"
+            title="Keep this plan and store the current figures as a second one"
+          >
+            {copied ? (
+              <>
+                <Check className="size-4" /> Copied
+              </>
+            ) : (
+              <>
+                <CopyPlus className="size-4" />
+                <span className="hidden sm:inline">Save as new</span>
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+        {/* Signed out, the honest thing to say first is that nothing is being
+            withheld: the whole projection is already on the page. What an
+            account buys is that it is still there tomorrow — which is a better
+            reason to make one than a wall would be, and it is true. */}
+        {error && (
+          <span className="max-w-xs text-xs font-medium text-destructive text-pretty">
+            {error}
+          </span>
+        )}
+        {/* Only for somebody signed out. Told that Save keeps their plan, a
+            signed-in reader learns nothing they did not read on the button. A
+            signed-out one is being told the thing the button does not say:
+            that the projection is already theirs, and that leaving without an
+            account is what loses it. */}
+        {!isAuthed && (
+          <span className="max-w-xs text-xs text-muted-foreground text-pretty">
+            Your projection is right here without an account. Sign in to save it
+            for next time, along with your assets and liabilities.
+          </span>
+        )}
+    </div>
+  )
+
+
+  /**
+   * The same save, pinned below both tabs.
+   *
+   * The button that names the plan belongs at the top with the name, but the
+   * fields run several screens below it, and asking somebody to scroll back to
+   * keep what they have just typed is asking them to lose it. At the foot of
+   * the inputs card it was no better — five open sections meant scrolling down
+   * past everything instead of up past everything — and it left the assets tab
+   * with no save at all, though one press keeps that too.
+   *
+   * The same handler as the button at the top, not a second save: one of them
+   * saying "Saved" while the other did not would be two answers to one
+   * question.
+   */
+  const saveRow = (
+    <div className="flex flex-wrap items-center justify-end gap-3 rounded-xl border border-border bg-card/95 px-5 py-3 shadow-lg backdrop-blur">
+      <span className="mr-auto text-xs text-muted-foreground">
+        {saved
+          ? 'Kept.'
+          : changed
+            ? 'Not saved yet — ⌘S works too.'
+            : 'Everything here is saved.'}
+      </span>
+      <Button
+        size="lg"
+        onClick={handleSave}
+        disabled={pending || (isAuthed && !inputs) || (!changed && !saved)}
+        className="gap-2 px-4 shadow-sm"
+      >
+        {saved ? (
+          <>
+            <Check className="size-4" /> Saved
+          </>
+        ) : (
+          <>
+            <Save className="size-4" />
+            {isAuthed ? (planId ? 'Update plan' : 'Save plan') : 'Sign in to save'}
+          </>
+        )}
+      </Button>
+    </div>
+  )
   return (
-    <div className="flex flex-col gap-6">
+    <>
+      {headerSlot ? createPortal(planHeader, headerSlot) : planHeader}
+      {footerSlot && createPortal(saveRow, footerSlot)}
+      <div className="flex flex-col gap-6">
       {/* Assumptions first: the inputs are what the rest of the page answers. */}
       <Card className="p-6">
-        <div className="mb-4 flex flex-col gap-1">
-          <h2 className="font-serif text-xl font-medium text-foreground">
-            Your assumptions
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Open a section to adjust it. Everything below updates as you type.
-          </p>
-        </div>
+        {/* The heading moved inside the panel, so the two ages could stand
+            level with it instead of taking a bordered row underneath. */}
         <PlanInputsPanel
           inputs={draft}
           onChange={setDraft}
           medianAtRetirement={monteCarlo?.balanceAtRetirement.median}
-          name={name}
-          onNameChange={setName}
           personName={personName}
           onPersonNameChange={setPersonName}
-          saveButton={
-            <div className="flex items-center gap-2">
-              <Button
-                size="lg"
-                onClick={handleSave}
-                disabled={pending || (isAuthed && !inputs)}
-                className="gap-2 px-4 shadow-sm"
-              >
-                {saved ? (
-                  <>
-                    <Check className="size-4" /> Saved
-                  </>
-                ) : (
-                  <>
-                    <Save className="size-4" />
-                    {isAuthed ? (planId ? 'Update' : 'Save') : 'Sign in to save'}
-                  </>
-                )}
-              </Button>
-              {/* Only once there is something to copy. On an unsaved plan the
-                  Save button already makes the new one. */}
-              {editingSaved && (
-                <Button
-                  size="lg"
-                  variant="outline"
-                  onClick={saveAsNew}
-                  disabled={pending || !inputs}
-                  className="gap-2 px-3"
-                  title="Keep this plan and store the current figures as a second one"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="size-4" /> Copied
-                    </>
-                  ) : (
-                    <>
-                      <CopyPlus className="size-4" />
-                      <span className="hidden sm:inline">Save as new</span>
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
-          }
         />
+
       </Card>
 
       {/* Then the verdict and its headline numbers. */}
@@ -385,7 +757,11 @@ export function RetirementPlanner({
           )}
         </div>
 
-        {inputs && result ? (
+        {/* Nothing at all while another tab is showing. Falling through to
+            the empty state would tell a complete plan to go and fill itself
+            in — invisible today, because the panel is hidden anyway, and
+            wrong the moment that changes. */}
+        {!active ? null : inputs && result ? (
           <Tabs
             defaultValue="balance"
             onValueChange={(value) => {
@@ -475,6 +851,7 @@ export function RetirementPlanner({
                 inputs={inputs}
                 rows={result.rows}
                 conversions={conversions}
+                room={room}
               />
             </TabsContent>
             <TabsContent value="table" className="pt-4">
@@ -507,6 +884,7 @@ export function RetirementPlanner({
         )}
       </div>
     </div>
+    </>
   )
 }
 

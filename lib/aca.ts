@@ -110,7 +110,44 @@ export const NATIONAL_AVERAGE_NOTE =
  * is what the benchmark above is quoted at.
  */
 export const AGE_FACTOR: Record<number, number> = {
+  // The federal default standard age curve, from the bottom. It used to start
+  // at 40, with a note that nobody on this path was under 50 in practice —
+  // true while a household could only ever be one or two adults, and wrong the
+  // moment a child could be on the policy. A child rated at a sixty-year-old's
+  // factor was charged three and a half times what they cost.
+  0: 0.765,
+  15: 0.833,
+  16: 0.859,
+  17: 0.885,
+  18: 0.913,
+  19: 0.941,
+  20: 0.97,
+  21: 1.0,
+  25: 1.004,
+  26: 1.024,
+  27: 1.048,
+  28: 1.087,
+  29: 1.119,
+  30: 1.135,
+  31: 1.159,
+  32: 1.183,
+  33: 1.198,
+  34: 1.214,
+  35: 1.222,
+  36: 1.23,
+  37: 1.238,
+  38: 1.246,
+  39: 1.262,
   40: 1.278,
+  41: 1.302,
+  42: 1.325,
+  43: 1.357,
+  44: 1.397,
+  45: 1.444,
+  46: 1.5,
+  47: 1.563,
+  48: 1.635,
+  49: 1.706,
   50: 1.786,
   51: 1.865,
   52: 1.952,
@@ -128,14 +165,15 @@ export const AGE_FACTOR: Record<number, number> = {
   64: 3.0,
 }
 
-const FIRST_AGE = 40
+const FIRST_AGE = 0
 const LAST_AGE = 64
 
 /** The age factor, holding the ends of the curve beyond what it carries. */
 export function ageFactor(age: number): number {
   const clamped = Math.min(Math.max(Math.floor(age), FIRST_AGE), LAST_AGE)
-  // The curve is sparse below 50; the nearest lower entry is close enough for
-  // a projection, and nobody on this path is under 50 in practice.
+  // Sparse where the curve is flat — every age from 0 to 14 rates the same,
+  // and 21 to 24 likewise — so the nearest entry at or below is the exact
+  // figure rather than an approximation of one.
   let factor = AGE_FACTOR[FIRST_AGE]
   for (let a = FIRST_AGE; a <= clamped; a++) if (AGE_FACTOR[a]) factor = AGE_FACTOR[a]
   return factor
@@ -180,9 +218,54 @@ export function applicablePercentage(fplRatio: number): number {
  * carries one age, and guessing a gap would be inventing a figure rather than
  * approximating one.
  */
+/**
+ * Children past the third are not charged for.
+ *
+ * A family rate is the sum of its members, except that only the three oldest
+ * children under 21 are counted. It is a real rule rather than a rounding, and
+ * without it a household of six would be quoted a premium no insurer would
+ * send them.
+ */
+export const CHILDREN_CHARGED = 3
+/** Under this age a person counts as a child for the cap above. */
+export const CHILD_AGE = 21
+
+/**
+ * What the benchmark plan costs a household, summed member by member.
+ *
+ * Every member used to be rated at the subscriber's own age and multiplied up,
+ * which is right for two adults of a similar age and wrong for anybody else. A
+ * sixty-year-old with two children was quoted $50,661 against a properly rated
+ * $32,471 — 56% too much — because each child was charged as a sixty-year-old.
+ *
+ * Nothing reached that path while a household could only be one or two adults.
+ * Letting dependents in is what makes it reachable, so it is fixed first.
+ */
+export function benchmarkAnnualFor(ages: number[]): number {
+  if (ages.length === 0) return 0
+  const perUnit = (BENCHMARK_40_MONTHLY / AGE_FACTOR[40]) * 12
+
+  const adults = ages.filter((a) => a >= CHILD_AGE)
+  // Oldest first, so the cap drops the youngest — which is the way round the
+  // rule is written and the more expensive three to charge for.
+  const children = ages
+    .filter((a) => a < CHILD_AGE)
+    .sort((a, b) => b - a)
+    .slice(0, CHILDREN_CHARGED)
+
+  const units = [...adults, ...children].reduce((a, age) => a + ageFactor(age), 0)
+  return perUnit * units
+}
+
+/**
+ * The same figure for a household of people all the same age.
+ *
+ * Kept because that is exactly what one or two adults of similar age is, and
+ * every caller that has no dependents to describe means precisely this.
+ */
 export function benchmarkAnnual(age: number, householdSize: number): number {
   const people = Math.max(1, Math.floor(householdSize))
-  return BENCHMARK_40_MONTHLY * (ageFactor(age) / AGE_FACTOR[40]) * 12 * people
+  return benchmarkAnnualFor(Array.from({ length: people }, () => age))
 }
 
 export interface AcaCost {
@@ -211,14 +294,18 @@ export interface AcaCost {
  * a household with a large benefit can be further up the scale than its tax
  * return suggests.
  */
-export function acaCost(
-  magi: number,
-  age: number,
-  householdSize: number,
-): AcaCost {
-  const line = povertyLine(householdSize)
+/**
+ * Everyone on the policy this year, by age.
+ *
+ * One list rather than an age and a count, because the two things it decides
+ * need different parts of it: the poverty line counts heads, and the premium
+ * rates each head separately. Passing a size and a single age let those two
+ * agree about the household while disagreeing about who was in it.
+ */
+export function acaCostFor(magi: number, ages: number[]): AcaCost {
+  const line = povertyLine(ages.length)
   const fplRatio = line > 0 ? magi / line : 0
-  const benchmark = benchmarkAnnual(age, householdSize)
+  const benchmark = benchmarkAnnualFor(ages)
   const overCliff = fplRatio > CLIFF
 
   // Below the poverty line the marketplace credit does not apply: that is
@@ -243,6 +330,16 @@ export function acaCost(
     onMedicaid,
     roomBelowCliff: Math.max(0, line * CLIFF - magi),
   }
+}
+
+/** A household of people all the same age, which is what no dependents means. */
+export function acaCost(
+  magi: number,
+  age: number,
+  householdSize: number,
+): AcaCost {
+  const people = Math.max(1, Math.floor(householdSize))
+  return acaCostFor(magi, Array.from({ length: people }, () => age))
 }
 
 /**
@@ -270,3 +367,39 @@ export function acaMagiOf(row: {
 
 /** The age marketplace cover stops mattering, because Medicare begins. */
 export const MEDICARE_AGE = 65
+
+/**
+ * The age a dependent comes off the policy.
+ *
+ * A child can stay on a parent's marketplace plan until they turn 26. Taken
+ * here as off in the year they turn 26 rather than part way through it, which
+ * is a year's simplification on a rule that varies by plan anyway — some run
+ * cover to the end of that month, some to the end of that year.
+ */
+export const DEPENDENT_COVER_TO = 26
+
+/**
+ * Everyone on the policy in a given year, by age.
+ *
+ * The spouse is taken to be the same age as the subscriber, which is the
+ * assumption the rest of the projection already makes — there is nowhere to
+ * enter a different one.
+ *
+ * Dependents are held as birth years rather than ages so that a plan reopened
+ * in three years still describes the same children. An age typed today is a
+ * fact with a shelf life; a birth year is not. Two children born in different
+ * years come off in different years without anybody having to say so.
+ */
+export function policyAges(
+  subscriberAge: number,
+  married: boolean,
+  dependentBirthYears: number[],
+  year: number,
+): number[] {
+  const ages = married ? [subscriberAge, subscriberAge] : [subscriberAge]
+  for (const born of dependentBirthYears) {
+    const age = year - born
+    if (age >= 0 && age < DEPENDENT_COVER_TO) ages.push(age)
+  }
+  return ages
+}

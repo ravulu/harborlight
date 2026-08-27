@@ -13,7 +13,7 @@ import {
   magiOf,
 } from '@/lib/irmaa'
 import { benefitFactor, spouseMonthlyBenefit } from '@/lib/social-security'
-import { acaCost, acaMagiOf } from '@/lib/aca'
+import { acaCostFor, acaMagiOf, policyAges } from '@/lib/aca'
 
 export interface PlanInputs {
   currentAge: number
@@ -85,6 +85,20 @@ export interface PlanInputs {
   healthCoverBefore65: 'marketplace' | 'own' | 'none'
   /** What that own plan costs a month, today's dollars. Only read for `own`. */
   healthPremiumMonthly: number
+  /**
+   * Children or others on the household's health plan, by the year they were
+   * born.
+   *
+   * Only marketplace cover reads this, and it moves two things at once: the
+   * poverty line the subsidy is means-tested against rises with each person,
+   * and so does the premium. A household of four keeps its credit $44,000
+   * further up than a couple does, and pays more for the plan it is keeping.
+   *
+   * Birth years rather than ages, so a saved plan still means the same thing
+   * when it is opened again. They come off as they reach 26, each in their own
+   * year, which is why this is a list rather than a count.
+   */
+  dependentBirthYears: number[]
   /**
    * What health care costs a month from 65, on top of Medicare itself.
    *
@@ -272,6 +286,16 @@ export interface YearRow {
   healthPremium: number
   healthSubsidy: number
   /**
+   * Whether this year's income passed 400% of the poverty line and gave up the
+   * whole credit.
+   *
+   * Recorded rather than left to be worked out again downstream. It was worked
+   * out again downstream, in `compareConversions`, and the second calculation
+   * priced marketplace cover for households that had told us they were covered
+   * some other way — because it read the ages and not the setting.
+   */
+  healthOverCliff: boolean
+  /**
    * Modified adjusted gross income this year, as Medicare measures it. Carried
    * because it is what sets the surcharge two years later, and because a
    * reader looking at a surcharge wants to see the income that caused it.
@@ -357,6 +381,7 @@ export const DEFAULT_INPUTS: PlanInputs = {
   spendingStep2Monthly: 0,
   healthCoverBefore65: 'marketplace',
   healthPremiumMonthly: 0,
+  dependentBirthYears: [],
   healthAfter65Monthly: 0,
   socialSecurityMonthly: 2000,
   // Full retirement age for anyone born in 1960 or later.
@@ -608,7 +633,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
    */
   const magiByAge = new Map<number, number>()
   /** What the poverty line and the benchmark premium are measured against. */
-  const householdSize = inputs.filingStatus === 'married' ? 2 : 1
+  const married = inputs.filingStatus === 'married'
   let totalIrmaa = 0
   let totalHealthPremium = 0
   let totalEmployerMatch = 0
@@ -702,6 +727,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
     let irmaaSurcharge = 0
     let healthPremium = 0
     let healthSubsidy = 0
+    let healthOverCliff = false
     /** Cover that is known rather than worked out: an own plan, or Medicare-side costs. */
     let statedHealth = 0
     let magi = 0
@@ -917,7 +943,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
         // once the year has been solved — and paying for it raises the income
         // it is priced off. Repeat until the figure stops moving.
         if (!onMarketplace) break
-        const cost = acaCost(
+        const cost = acaCostFor(
           acaMagiOf({
             fromDeferred: fromDeferred / inflator,
             conversion: conversion / inflator,
@@ -925,11 +951,14 @@ export function simulate(inputs: PlanInputs): PlanResult {
             socialSecurity: socialSecurity / inflator,
             capitalGains: capitalGains / inflator,
           }),
-          age,
-          householdSize,
+          // Who is on the policy this year, not a count fixed at the start of
+          // it. Children come off as they turn 26, and both the poverty line
+          // and the premium step down with them.
+          policyAges(age, married, inputs.dependentBirthYears, thisYear + yearsFromNow),
         )
         const next = cost.net * inflator
         healthSubsidy = cost.subsidy * inflator
+        healthOverCliff = cost.overCliff
 
         /**
          * Stop on the figure the solve above actually funded, never on the one
@@ -1069,6 +1098,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
       irmaaSurcharge: irmaaSurcharge * flowDeflator,
       healthPremium: (healthPremium + statedHealth) * flowDeflator,
       healthSubsidy: healthSubsidy * flowDeflator,
+      healthOverCliff,
       magi,
       capitalGains: capitalGains * flowDeflator,
       stateTax: stateTax * flowDeflator,

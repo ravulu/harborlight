@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  benchmarkAnnualFor,
+  policyAges,
   ACA_YEAR,
   AGE_FACTOR,
   APPLICABLE_PERCENTAGE,
@@ -107,9 +109,96 @@ describe('benchmarkAnnual', () => {
   })
 
   it('holds the ends of the age curve rather than running off it', () => {
-    expect(ageFactor(30)).toBe(AGE_FACTOR[40])
+    // The bottom used to be 40, with a note that nobody on this path was ever
+    // under 50. That was true while a household could only be one or two
+    // adults; a child on the policy walks straight past it, and a child rated
+    // at forty was charged two-thirds more than a child costs.
+    expect(ageFactor(-5)).toBe(AGE_FACTOR[0])
     expect(ageFactor(70)).toBe(AGE_FACTOR[64])
     expect(ageFactor(62.9)).toBe(AGE_FACTOR[62])
+  })
+
+  it('rates a child as a child, all the way down to nought', () => {
+    // Flat below 15, so every one of these is the exact figure rather than the
+    // nearest one. A child costs roughly a quarter of what a sixty-year-old
+    // does, which is the whole difference this curve was hiding.
+    for (const age of [0, 5, 10, 14]) expect(ageFactor(age)).toBe(0.765)
+    expect(ageFactor(15)).toBeGreaterThan(ageFactor(14))
+    expect(ageFactor(21)).toBe(1)
+    expect(ageFactor(10) / ageFactor(60)).toBeLessThan(0.3)
+  })
+
+  it('rises the whole way up, never falling back', () => {
+    let last = 0
+    for (let age = 0; age <= 64; age++) {
+      const f = ageFactor(age)
+      expect(f, `age ${age}`).toBeGreaterThanOrEqual(last)
+      last = f
+    }
+  })
+})
+
+describe('a household priced member by member', () => {
+  it('charges each person at their own age, not the subscriber\'s', () => {
+    // Every member used to be rated at the subscriber's age and multiplied up.
+    // A sixty-year-old with two children was quoted 56% more than the plan
+    // costs, because each child was charged as a sixty-year-old.
+    const flat = benchmarkAnnual(60, 4)
+    const real = benchmarkAnnualFor([60, 60, 10, 13])
+    expect(real).toBeLessThan(flat)
+    expect(real / flat).toBeLessThan(0.7)
+  })
+
+  it('still charges a couple of the same age twice over', () => {
+    // The old behaviour was right for the one household it could describe, and
+    // that has to keep holding or every existing plan moves.
+    expect(benchmarkAnnualFor([62, 62])).toBeCloseTo(benchmarkAnnual(62, 1) * 2, 6)
+    expect(benchmarkAnnualFor([62])).toBeCloseTo(benchmarkAnnual(62, 1), 6)
+  })
+
+  it('charges for only the three oldest children', () => {
+    const three = benchmarkAnnualFor([60, 60, 18, 16, 13])
+    const five = benchmarkAnnualFor([60, 60, 18, 16, 13, 10, 8])
+    expect(five).toBe(three)
+  })
+
+  it('counts somebody who has turned 21 as an adult, cap or no cap', () => {
+    // The cap is on children, so a fourth person of 21 is charged even though
+    // a fourth person of 20 would not be.
+    const grown = benchmarkAnnualFor([60, 60, 18, 16, 13, 21])
+    const child = benchmarkAnnualFor([60, 60, 18, 16, 13, 20])
+    expect(grown).toBeGreaterThan(child)
+  })
+
+  it('costs nothing for nobody', () => {
+    expect(benchmarkAnnualFor([])).toBe(0)
+  })
+})
+
+describe('who is on the policy in a given year', () => {
+  it('drops each dependent in the year they turn 26, one at a time', () => {
+    const born = [2010, 2013]
+    const at = (year: number) => policyAges(60, true, born, year).length
+    expect(at(2030)).toBe(4)
+    // 2010 turns 26 in 2036; 2013 in 2039.
+    expect(at(2035)).toBe(4)
+    expect(at(2036)).toBe(3)
+    expect(at(2038)).toBe(3)
+    expect(at(2039)).toBe(2)
+    expect(at(2050)).toBe(2)
+  })
+
+  it('ignores a dependent who is not born yet', () => {
+    expect(policyAges(50, false, [2030], 2026)).toEqual([50])
+  })
+
+  it('takes the spouse to be the same age, which is all the plan knows', () => {
+    expect(policyAges(58, true, [], 2026)).toEqual([58, 58])
+    expect(policyAges(58, false, [], 2026)).toEqual([58])
+  })
+
+  it('puts each dependent in at their age that year', () => {
+    expect(policyAges(60, false, [2010, 2013], 2030)).toEqual([60, 20, 17])
   })
 })
 

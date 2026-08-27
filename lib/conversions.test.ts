@@ -498,3 +498,128 @@ describe('per-year premium figures', () => {
     expect(c.none.acaPerYear).toBeLessThan(c.best.acaPerYear)
   })
 })
+
+/**
+ * Where the ACA premium is charged, now that two things charge it.
+ *
+ * `acaAcross` in `lib/conversions.ts` carries a comment saying the premium is
+ * "priced here rather than charged inside the projection on purpose", because
+ * charging it in both places would bill it twice. That was true when it was
+ * written. The health-cover work then made `simulate` add the premium to the
+ * year's shortfall and report it as `totalHealthPremium`, and nothing in
+ * `compareConversions` turns that off.
+ *
+ * So the same premium is now worked out twice by two different pieces of code.
+ * These tests pin what that actually does, because the intuitive answer — that
+ * the cost is inflated — is wrong, and the decision should be made against the
+ * real numbers rather than against the stale comment.
+ */
+describe('where the ACA premium is charged', () => {
+  const early = plan({
+    currentAge: 54,
+    retirementAge: 55,
+    endAge: 90,
+    balance401k: 1_500_000,
+    brokerageBalance: 200_000,
+    monthlyRetirementSpending: 4_000,
+    socialSecurityAge: 70,
+  })
+
+  it('the projection charges the premium and reports it', () => {
+    expect(simulate(early).totalHealthPremium).toBeGreaterThan(0)
+    expect(
+      simulate({ ...early, healthCoverBefore65: 'none' }).totalHealthPremium,
+    ).toBe(0)
+  })
+
+  it('and compareConversions reports exactly that, not its own version', () => {
+    const c = compareConversions(early)!
+    for (const o of c.options) {
+      const run = simulate({
+        ...early,
+        conversionAnnual: o.annual,
+        conversionFromAge: c.fromAge,
+        conversionToAge: c.toAge,
+      })
+      // One calculation, read twice. These were two independent ones for a
+      // while, agreeing to a fraction of a percent and held together by
+      // nothing; `acaAcross` now reads the projection's own rows, so they
+      // agree exactly or the row is not being read.
+      expect(o.lifetimeAca, `${o.annual}`).toBeCloseTo(run.totalHealthPremium, 6)
+    }
+  })
+
+  it('charging it inside lowers lifetime tax rather than raising it', () => {
+    const covered = simulate(early)
+    const not = simulate({ ...early, healthCoverBefore65: 'none' })
+
+    // The intuitive reading — that funding a premium forces bigger
+    // withdrawals and so more tax — is wrong over a whole plan. The premium
+    // depletes the portfolio, so every later withdrawal is smaller, and less
+    // tax is paid in total. The surcharge falls for the same reason.
+    expect(covered.totalTaxes).toBeLessThan(not.totalTaxes)
+    expect(covered.totalIrmaa).toBeLessThanOrEqual(not.totalIrmaa)
+  })
+
+  it('so lifetimeCost mixes a post-premium tax figure with the premium', () => {
+    const c = compareConversions(early)!
+    for (const o of c.options) {
+      expect(o.lifetimeCost, `${o.annual}`).toBeCloseTo(
+        o.lifetimeTax + o.lifetimeIrmaa + o.lifetimeAca,
+        0,
+      )
+    }
+    // `lifetimeTax` is measured on a plan that has already spent the premium,
+    // and `lifetimeAca` is then added on top. Defensible as "everything this
+    // choice costs the household" — but it is not what the comment describes,
+    // and the two halves are no longer independent of each other.
+    expect(c.none.lifetimeTax).toBeCloseTo(simulate(early).totalTaxes, 0)
+    expect(c.none.lifetimeAca).toBeGreaterThan(0)
+  })
+
+  it('charges nothing to a household covered some other way', () => {
+    // This is what reading the rows fixed. Pricing from the ages alone showed
+    // tens of thousands of marketplace premiums to somebody on an employer
+    // plan, while the projection beside it charged nothing.
+    for (const cover of ['own', 'none'] as const) {
+      const p = plan({ ...early, healthCoverBefore65: cover })
+      const c = compareConversions(p)!
+      expect(simulate(p).totalHealthPremium, cover).toBe(0)
+      for (const o of c.options) expect(o.lifetimeAca, `${cover} ${o.annual}`).toBe(0)
+      // And the columns those figures fill stay out of sight, rather than
+      // showing a row of zeroes.
+      expect(c.beforeMedicare, cover).toBe(false)
+      expect(c.acaSaving, cover).toBe(0)
+    }
+  })
+
+  it('still charges a household that is buying it', () => {
+    const c = compareConversions(early)!
+    expect(c.beforeMedicare).toBe(true)
+    expect(c.none.lifetimeAca).toBeGreaterThan(0)
+  })
+
+  it('does not change which amount is recommended, on either shape of plan', () => {
+    // The guard that matters. Whatever is decided about the cost formula, this
+    // says whether the advice moves — and today it does not, on a long ACA
+    // runway or a short one. If a change to `lifetimeCost` makes this fail,
+    // the recommendation moved and that is the thing to look at.
+    const single = plan({
+      filingStatus: 'single',
+      currentAge: 57,
+      retirementAge: 58,
+      endAge: 90,
+      balance401k: 1_100_000,
+      brokerageBalance: 250_000,
+      monthlyRetirementSpending: 3_500,
+      socialSecurityAge: 70,
+    })
+    for (const p of [early, single]) {
+      const c = compareConversions(p)!
+      const withoutAca = c.options.reduce((a, b) =>
+        b.lifetimeTax + b.lifetimeIrmaa < a.lifetimeTax + a.lifetimeIrmaa ? b : a,
+      )
+      expect(withoutAca.annual).toBe(c.best.annual)
+    }
+  })
+})

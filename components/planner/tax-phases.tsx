@@ -18,11 +18,29 @@ import { findState, FILING_STATUSES, type FilingStatus } from '@/lib/state-tax'
 import type { ConversionComparison } from '@/lib/conversions'
 import { InsightsLink } from '@/components/planner/insights-link'
 import { ClaimingLadder } from '@/components/planner/claiming-ladder'
+import { RoomToMove } from '@/components/planner/room-to-move'
+import type { RoomWindow } from '@/lib/room'
 import { compareClaiming } from '@/lib/claiming'
 import { CLIFF, MEDICARE_AGE, NATIONAL_AVERAGE_NOTE, povertyLine } from '@/lib/aca'
 import { cn } from '@/lib/utils'
 
 const money = (v: number) => formatCurrency(Math.round(v))
+
+/**
+ * Small numbers written out, as prose wants them.
+ *
+ * This used to be `size === 2 ? 'two' : 'one'`, which was every household the
+ * app could describe. Dependents made larger ones possible, and that ternary
+ * would have called a family of five "one".
+ */
+const HOUSEHOLD_WORDS: Record<number, string> = {
+  1: 'one',
+  2: 'two',
+  3: 'three',
+  4: 'four',
+  5: 'five',
+  6: 'six',
+}
 
 
 
@@ -35,6 +53,7 @@ export function TaxPhases({
   inputs,
   rows,
   conversions,
+  room,
 }: {
   inputs: PlanInputs
   /** The projected years, so the 59½ split knows when the 401(k) is drawn. */
@@ -44,6 +63,11 @@ export function TaxPhases({
    * insight card so the two cannot quote different amounts.
    */
   conversions: ConversionComparison | null
+  /**
+   * The low-income window, run by the planner so this tab does not run the
+   * projection a second time on every keystroke.
+   */
+  room: RoomWindow | null
 }) {
   const phases = taxPhases(inputs, inputs.taxState, inputs.filingStatus, rows)
   const state = findState(inputs.taxState)
@@ -272,6 +296,8 @@ export function TaxPhases({
           )
         })}
       </div>
+
+      <RoomToMove window={room} />
 
       <SuggestedActions conversions={conversions} inputs={inputs} />
 
@@ -899,7 +925,7 @@ function RothConversions({
               splits between the two depends on your income for the year, and
               moving money into a Roth counts as income. Above four times the poverty line — {' '}
               {money(povertyLine(c.householdSize) * CLIFF)} for a household of{' '}
-              {c.householdSize === 2 ? 'two' : 'one'} — the subsidy stops
+              {HOUSEHOLD_WORDS[c.householdSize] ?? c.householdSize} — the subsidy stops
               entirely rather than tapering, which is why this column can leap
               between one row and the next.
             </Column>

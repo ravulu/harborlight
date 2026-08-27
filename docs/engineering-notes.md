@@ -151,6 +151,270 @@ covers 65-onward costs — that division is now stated in the category hint.
 
 ---
 
+## 3c. Holdings is the start of a family balance sheet
+
+`/holdings` looks like an alternative-investments screen. It is the first
+piece of something larger: a household balance sheet and its future cash
+flows, decided 2026-08-26. Read it that way before changing it.
+
+Two consequences that are already live:
+
+**`Holding.counted` is a placeholder, not dead code.** It currently does one
+thing — moves a holding's equity between the two totals at the top of the
+screen. Its label says "Count it in the plan", which promises a reach into the
+retirement projection that does not exist: nothing outside `/holdings` imports
+`lib/holdings.ts`. That mismatch is known and deliberately left alone until the
+integration is designed. **Do not delete it as unused, and do not wire it to
+`simulate` without that design.**
+
+**The planner already holds part of the balance sheet.** Brokerage, 401(k),
+IRA, Roth and HSA live on `PlanInputs`. When the two are joined, those must
+appear once and not twice — the obvious failure is a net-worth figure that
+double-counts every retirement account. Whatever merges them needs a single
+owner for each balance, not two stores that happen to agree.
+
+Not yet modelled and worth naming before the shape hardens: liabilities with no
+asset attached (student loans, cards, car loans), non-investment assets (cash,
+vehicles, 529s), ownership between spouses, and the outgoing side of the cash
+flows. The projection models spending as one figure; a balance sheet models it
+as a set of obligations, and those are different enough that merging them is a
+design decision rather than a merge.
+
+### The ownership rule, decided 2026-08-26
+
+**Liquid balances belong to `PlanInputs`. Illiquid belong to `Holding`. Neither
+may hold the other's kind.** Brokerage, 401(k), IRA, Roth and HSA stay in the
+planner; property, private equity, funds, business stakes and notes stay here.
+
+That is what makes the join need no reconciliation at all:
+
+```
+family net worth at age N
+  = simulate(plan).rows[N].endBalance     ← liquid, already projected per year
+  + Σ holdings' value at N, less debt     ← illiquid, own growth rate
+```
+
+Nothing appears twice by construction, so there is no dedupe step to get wrong.
+Worth enforcing rather than trusting: a test that `HOLDING_KINDS` never grows a
+liquid member, and that `lib/holdings.ts` never imports a balance field from the
+planner, catches a double-count when it is introduced rather than in a net-worth
+figure nobody reconciles.
+
+### One abstraction covers the lot
+
+Every holding, and every plan for one, is a **timeline of cash flows**: an
+outflow to acquire, a stream while held, an inflow on disposal.
+
+| | acquire | while held | dispose |
+| --- | --- | --- | --- |
+| Rental | — | rent less costs | sale, after recapture and gains |
+| Keep the house | — | tax, insurance, upkeep | step-up at death |
+| Downsize | new home price | lower running costs | sale proceeds |
+| Sell and rent | — | rent, rising with inflation | sale proceeds |
+| Second home | purchase at an age | running costs, maybe rent | sale, or held |
+
+So a second-home plan is not a separate feature — it is the same machinery with
+the acquisition leg filled in. Build the timeline once.
+
+### The property ladder, when it comes
+
+Keep / downsize / sell-and-rent is structurally the conversion ladder and the
+claiming ladder again: every option priced, no winner named, same tests. Three
+things have to be in it or it is not a fair comparison:
+
+- **§121** — $250k single, $500k married of gain excluded on a main home.
+  Already implemented in `lib/holdings.ts`.
+- **Stepped-up basis.** Hold until death and heirs take the property at market
+  value; the whole lifetime gain escapes capital gains tax. A comparison
+  counting only cash flow will always favour selling and will be wrong for any
+  household that wants to leave something.
+- **Rent inflation.** Selling gives a fixed lump; renting costs more every year
+  for thirty. The crossover age is the whole question, and it is the same shape
+  as the Social Security break-even already shipped.
+
+### Build order
+
+1. Net worth over time — liquid plus illiquid, by year.
+2. The cash-flow ledger — rent, interest, debt service, running costs.
+3. The property ladder, with the step-up column.
+4. Second home, as the acquisition leg on the same timeline.
+
+**The decision deferred:** a ladder needs a metric, and the honest one is what
+happens to the household, which lives in the projection. Until the two join,
+the ladder reports a balance-sheet metric only — net worth at end age, cash flow
+per year — and cannot say "this is worth two years of retirement".
+
+---
+
+## 3d. Open task: recreate plan3
+
+`ravi@bat-vc.com` had two plans and now has none. They went between the
+household migration on 2026-08-26 and shortly after it. Nothing in the balance
+sheet work can delete a plan — the only path is `deletePlan` in
+`app/actions/plans.ts`, reachable from the saved-plans list alone, and the new
+writes delete from `holdings` and `liabilities` scoped by `userId`. Cause
+unknown; recorded rather than guessed at.
+
+The household row survives with the values it was seeded from, which is why
+those figures still read age 30, married.
+
+"plan3" can be rebuilt exactly from the analysis it was used for:
+
+```
+currentAge 30 · retirementAge 65 · endAge 90 · married · no state
+brokerage 3,000,000 (gainShare 50) · 401k 1,000,000 · IRA 0 · Roth 0
+monthlyRetirementSpending 20,000
+  step 1: age 75 -> 17,000     step 2: age 85 -> 19,000
+socialSecurityMonthly 3,000 at 67 · spouseBenefitMonthly 2,000 at 67
+preRetirementReturn 7 · postRetirementReturn 7 · inflationRate 2.5
+```
+
+### The question integration has to answer first
+
+When the balance sheet feeds the projection, "save this plan" stops being a
+simple act. A plan is a version, and the balance sheet is a live statement of
+what the household has right now — the two change on different clocks.
+
+Three things follow, and none of them are decided:
+
+- **Does a saved plan snapshot the balance sheet or point at it?** Snapshot and
+  a plan saved in March still assumes a rental sold in May. Point at it and a
+  saved plan silently reports different figures each time it is opened, which
+  makes comparing two plans a comparison of two moments as much as two
+  strategies.
+- **What does Save mean then?** Today the button keeps a plan and the balance
+  sheet writes itself continuously, which is right while they are separate. It
+  will not stay right.
+- **What does Compare mean?** Two plans built against different balance sheets
+  are not comparable on the figures that matter.
+
+The current labelling assumes they are separate and says so: the button reads
+"Save plan", and the household tile says the balance sheet saves as you type.
+Both will need revisiting on the day the two are joined.
+
+### One of those three is now decided
+
+The register belongs to the **plan**, not the user — `getPlanRegister(planId)`
+and `savePlanRegister(planId, register)` in `app/actions/balance-sheet.ts`, with
+`planId` a cascading foreign key on both tables. So a saved plan **snapshots**
+its assets and liabilities, and one Save covers both tabs.
+
+That answers the first bullet and makes Compare meaningful again: two plans
+carry their own registers, so comparing them compares two strategies rather
+than two moments. What is still undecided is the second bullet — the household
+tile auto-saves as you type while the register waits for Save, which is two
+clocks on one screen.
+
+---
+
+## 3e. Connecting the two tabs: four phases
+
+Written 2026-08-26, before any of it is built. Nothing here is implemented.
+
+### Where the wire runs today
+
+One way, and display-only. The planner computes `ordinaryByAge`
+(`components/planner/retirement-planner.tsx`), the workspace parks it in
+`useState`, and the holdings screen uses it to price each sale's tax band. It
+exists so a gain is charged against the income of the year it is realised in
+rather than one figure somebody typed.
+
+`lib/retirement.ts` has **no** knowledge of holdings — no import, no reference.
+
+### Why `otherIncomeMonthly` is the wrong wire
+
+The obvious move is to populate the planner's "Other monthly income" from the
+register. It gives wrong tax, for four separate reasons.
+
+**One number is doing two jobs.** `otherIncome` reduces the year's shortfall as
+cash *and* enters the tax solve as ordinary income — the same figure both
+times. But `annualIncome` returns `{cash, taxable, shelter}` and for everything
+that matters the first two differ: a rental's depreciation, a syndication's
+K-1 shelter, an accruing note that pays no cash at all until it matures. Feed
+it `cash` and it overtaxes; feed it `taxable` and the plan thinks there is less
+money than there is.
+
+**It is a series, not a monthly constant.** Income stops at a sale or a
+maturity, and a rental's shelter runs out at 27.5 years — taxable income jumps
+with no change in cash. `otherIncomeMonthly` is one figure times an inflator
+from a start age and cannot express any of that.
+
+**`annualIncome(h, currentAge)` ignores its own `currentAge`.** It reports
+income for a holding already sold. Correct for a "today" tile, wrong for a
+projection.
+
+**Character is missing.** The planner taxes other income as wholly ordinary.
+Rental and passive syndication income attract NIIT; sponsor fees attract
+self-employment tax instead, which is modelled nowhere in the codebase.
+`annualIncome` has no character field to carry the difference.
+
+### The double-count traps
+
+Two, and the second is the larger.
+
+- **Income.** Anyone who already typed rental income into "Other monthly
+  income" gets it twice the moment the register populates it.
+- **Costs.** `annualCosts` returns upkeep and liabilities carry
+  `monthlyPayment`, but `monthlyRetirementSpending` is user-typed and probably
+  already includes the mortgage and the property tax. Charging both is a large
+  error in the wrong direction.
+
+A related trap: a fixed mortgage payment is **nominal** and the projection works
+in today's money, so it shrinks in real terms every year. Rent inflates. A fixed
+CD coupon does not.
+
+### Why sales are the hard half
+
+`realise` gives `netProceeds` at an age, but the planner has no channel for a
+lump sum. Proceeds have to land somewhere, the tax has to be paid that year, the
+mortgage payoff has to clear the liability, and the holding's income and costs
+have to stop.
+
+Then it closes the loop. A sale's tax depends on that year's other income, and
+if the proceeds are part of that income the year has to be solved for a fixed
+point. **The open loop is what makes today's `useState` wire safe.** Close it
+and React state cannot host it — that is a render loop.
+
+Precedent exists: the ACA premium solve does exactly this with
+`HEALTH_SOLVE_PASSES = 4`. But it lives *inside* `simulate`. So the register has
+to become an argument — `simulate(inputs, register)` — rather than a sibling
+component passing maps through the workspace. **That is the architectural
+change, and it gates everything else.**
+
+Two consequences to expect:
+
+- **A sale year fires IRMAA and the ACA cliff on its own.** Both are already
+  modelled. A sale can cost far more than its capital gains tax, and this is
+  the most valuable thing the integration would surface. Saved plans will move.
+- **Monte Carlo runs 10,000 times.** Holdings would be deterministic overlays
+  at first, so property growth is certain while markets are not. Defensible,
+  but it has to be said on the page rather than left implicit.
+
+### The four phases
+
+| Phase | What | Gated on |
+| --- | --- | --- |
+| 1 | Income only, no sales | `simulate(inputs, register)`; per-age series carrying cash and taxable apart; age-aware `annualIncome` |
+| 2 | Costs and liability payments | the double-count decision; nominal vs real |
+| 3 | Sales | the year solved to a fixed point, as health cover already is |
+| 4 | NIIT and self-employment tax | a character field on `annualIncome`; an SE module that does not exist |
+
+Phase 1 leaves the loop open, so it needs no fixed point and earns its keep
+soonest. Phase 3 is where the app starts saying something a reader cannot work
+out themselves — a sale year that costs three years of Medicare surcharge is
+genuinely hard to see coming.
+
+### Decisions needed before phase 1
+
+1. Does "Other monthly income" survive as a field, become derived and
+   read-only, or keep a typed figure beside a derived one?
+2. Do costs and debt payments get charged? If so, does
+   `monthlyRetirementSpending` change meaning to "everything except what is in
+   Assets & liabilities"?
+3. Do sale proceeds land in the brokerage, or does the reader choose?
+
+---
+
 ## 4. Rollback map
 
 Recent features were built to be removed cleanly. Each is new files plus a

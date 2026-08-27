@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { PLANNER_TABS, tabLabel, tabPath } from '@/lib/planner-tabs'
+import {
+  PLANNER_TABS,
+  WORKSPACE_TABS,
+  isSectionPath,
+  sectionPath,
+  tabLabel,
+  tabPath,
+} from '@/lib/planner-tabs'
 import { EVENT_NAMES, isEventName } from '@/lib/events'
 
 describe('the planner tabs', () => {
@@ -45,5 +52,40 @@ describe('the planner tabs', () => {
       expect(tabPath(t.value).split('?')[0]).toBe(tabPath(t.value))
       expect(tabPath(t.value)).toContain('#')
     }
+  })
+})
+
+/**
+ * Two levels of tab share one event name and are told apart by their path.
+ *
+ * The top-level register tab was called `balance` for a while, which is also
+ * the projection's first tab — recorded against the same fragment they would
+ * have been counted as one thing, and the admin would have reported a number
+ * that was two numbers added together.
+ */
+describe('the two levels of tab do not collide', () => {
+  it('gives the top-level tabs their own paths', () => {
+    for (const t of WORKSPACE_TABS) {
+      expect(sectionPath(t.value)).toContain('#section-')
+      expect(tabLabel(sectionPath(t.value))).toBe(t.label)
+      expect(isSectionPath(sectionPath(t.value))).toBe(true)
+    }
+  })
+
+  it('shares no path with the projection tabs', () => {
+    const sections = WORKSPACE_TABS.map((t) => sectionPath(t.value))
+    const tabs = PLANNER_TABS.map((t) => tabPath(t.value))
+    expect(new Set([...sections, ...tabs]).size).toBe(sections.length + tabs.length)
+  })
+
+  it('keeps the projection tabs out of the section bucket', () => {
+    for (const t of PLANNER_TABS) {
+      expect(isSectionPath(tabPath(t.value)), t.value).toBe(false)
+      expect(tabLabel(tabPath(t.value))).toBe(t.label)
+    }
+  })
+
+  it('leaves an unrecognised section path alone', () => {
+    expect(tabLabel('/planner#section-gone')).toBe('/planner#section-gone')
   })
 })

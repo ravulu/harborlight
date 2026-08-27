@@ -42,11 +42,43 @@ export const PLANNER_TABS = [
 
 export type PlannerTab = (typeof PLANNER_TABS)[number]['value']
 
+/**
+ * The two top-level tabs, which are a different question from the four above.
+ *
+ * Those four are views of one projection; these two are the halves of the
+ * household. Both are worth knowing about and they are counted apart, because
+ * "did anybody open the register" and "did anybody read the tax view" are not
+ * the same finding.
+ */
+export const WORKSPACE_TABS = [
+  { value: 'plan', label: 'Retirement plan' },
+  { value: 'assets', label: 'Assets & liabilities' },
+] as const
+
+export type WorkspaceTab = (typeof WORKSPACE_TABS)[number]['value']
+
+/**
+ * The path a top-level tab is recorded against.
+ *
+ * Prefixed, and deliberately: the register's tab was called `balance` for a
+ * while, which is also the name of the projection's first tab — the two would
+ * have been recorded against the same fragment and counted as one thing.
+ */
+export const sectionPath = (value: string) => `/planner#section-${value}`
+
 /** The path a tab view is recorded against. */
 export const tabPath = (value: string) => `/planner#${value}`
 
 /** The label for a recorded path, for the admin to show. Unknown stays raw. */
 export function tabLabel(path: string): string {
-  const value = path.split('#')[1] ?? ''
-  return PLANNER_TABS.find((t) => t.value === value)?.label ?? path
+  const fragment = path.split('#')[1] ?? ''
+  if (fragment.startsWith('section-')) {
+    const value = fragment.slice('section-'.length)
+    return WORKSPACE_TABS.find((t) => t.value === value)?.label ?? path
+  }
+  return PLANNER_TABS.find((t) => t.value === fragment)?.label ?? path
 }
+
+/** Whether a recorded path is one of the top-level tabs. */
+export const isSectionPath = (path: string) =>
+  (path.split('#')[1] ?? '').startsWith('section-')

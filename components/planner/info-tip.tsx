@@ -39,17 +39,27 @@ export function Field({
  */
 export function InfoTip({
   label,
+  question,
   children,
   className,
 }: {
   label: string
+  /**
+   * What the trigger announces, where "What {label} means" does not read.
+   *
+   * Most labels are a single noun and the default sentence is right. One that
+   * names two things — "Monte Carlo and the confidence figure" — comes out
+   * with a singular verb after a plural subject, and a screen reader has no
+   * way to skip past it.
+   */
+  question?: string
   children: React.ReactNode
   className?: string
 }) {
   return (
     <Popover>
       <PopoverTrigger
-        aria-label={`What ${label} means`}
+        aria-label={question ?? `What ${label} means`}
         className={
           className ??
           'ml-auto rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'

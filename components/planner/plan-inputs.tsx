@@ -5,11 +5,6 @@ import type { PlanDraft, PlanInputs, YearRow } from '@/lib/retirement'
 import { formatCurrency, simulate, toPlanInputs } from '@/lib/retirement'
 import { withDerivedRates } from '@/lib/planner-draft'
 import {
-  STATE_TAXES,
-  FILING_STATUSES,
-  findState,
-} from '@/lib/state-tax'
-import {
   benefitFactor,
   benefitFactorLabel,
   spousalFactor,
@@ -17,13 +12,13 @@ import {
   SPOUSAL_SHARE,
   FULL_RETIREMENT_AGE,
 } from '@/lib/social-security'
-import { taxPhases } from '@/lib/tax'
 import { MEDICARE_AGE } from '@/lib/aca'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Slider } from '@/components/ui/slider'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { DEPENDENT_COVER_TO } from '@/lib/aca'
 import { ExpenseEstimator } from './expense-estimator'
 import { Field, InfoTip } from './info-tip'
 import { useWindowReturn } from '@/lib/use-window-return'
@@ -40,8 +35,8 @@ import {
  * comparable. Ordering is enforced by nudging the later ages along rather than
  * by narrowing each slider's range.
  */
-const AGE_MIN = 18
-const AGE_MAX = 110
+export const AGE_MIN = 18
+export const AGE_MAX = 110
 
 /** The window in which a US retirement benefit can actually be claimed. */
 const SS_AGE_MIN = 62
@@ -67,6 +62,7 @@ function ValueInput({
   onChange,
   label,
   suffix,
+  small,
 }: {
   value: number
   min: number
@@ -74,6 +70,8 @@ function ValueInput({
   onChange: (v: number) => void
   label: string
   suffix?: string
+  /** A step down in size, for a slider that qualifies the field above it. */
+  small?: boolean
 }) {
   // Non-null only while the field is being edited.
   const [text, setText] = useState<string | null>(null)
@@ -111,7 +109,13 @@ function ValueInput({
         }
         setText(null)
       }}
-      className="w-20 rounded-md border border-border bg-background px-2 py-1 text-right text-sm font-medium tabular-nums text-foreground transition-colors focus:border-ring focus:outline-none"
+      className={cn(
+        'rounded-md border border-border bg-background text-right font-medium tabular-nums text-foreground transition-colors focus:border-ring focus:outline-none',
+        // One width in both sizes. A narrower box on the second row ended
+        // short of the first and undid the alignment the shape is for.
+        'w-16',
+        small ? 'px-1.5 py-0.5 text-xs' : 'px-2 py-1 text-sm',
+      )}
     />
   )
 }
@@ -125,6 +129,7 @@ function SliderField({
   step,
   onChange,
   suffix,
+  under,
 }: {
   id: string
   label: string
@@ -134,34 +139,72 @@ function SliderField({
   step: number
   onChange: (value: number) => void
   suffix?: string
+  /**
+   * Sat beneath a field it qualifies, rather than standing on its own.
+   *
+   * Two things change. The track and its box share a line instead of taking
+   * one each, because a slider that is a footnote to the box above it should
+   * not be as tall as the box. And the lettering drops a step, so the pair
+   * reads as one field with a qualifier rather than two of equal standing —
+   * "how much of that is profit" is not a second question, it is the rest of
+   * the first.
+   */
+  under?: boolean
 }) {
+  const track = (
+    <Slider
+      id={id}
+      min={min}
+      max={max}
+      step={step}
+      value={[value]}
+      onValueChange={(v) => {
+        const nextValue = Array.isArray(v) ? v[0] : v
+        if (typeof nextValue === 'number') onChange(nextValue)
+      }}
+      aria-label={label}
+    />
+  )
+  const box = (
+    <ValueInput
+      value={value}
+      min={min}
+      max={max}
+      onChange={onChange}
+      label={label}
+      suffix={suffix}
+      small={under}
+    />
+  )
+
+  if (under) {
+    // Everything on one line, under the box it belongs to. A slider that
+    // qualifies the field above it is a footnote, and a footnote does not get
+    // a heading of its own and a rule of its own — it gets the rest of the
+    // line. The lettering drops a step for the same reason.
+    return (
+      <div className="flex items-center gap-2">
+        <Label
+          htmlFor={id}
+          className="shrink-0 text-xs leading-tight text-muted-foreground"
+        >
+          {label}
+        </Label>
+        <div className="min-w-12 flex-1">{track}</div>
+        {box}
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-3">
         <Label htmlFor={id} className="text-sm text-muted-foreground">
           {label}
         </Label>
-        <ValueInput
-          value={value}
-          min={min}
-          max={max}
-          onChange={onChange}
-          label={label}
-          suffix={suffix}
-        />
+        {box}
       </div>
-      <Slider
-        id={id}
-        min={min}
-        max={max}
-        step={step}
-        value={[value]}
-        onValueChange={(v) => {
-          const nextValue = Array.isArray(v) ? v[0] : v
-          if (typeof nextValue === 'number') onChange(nextValue)
-        }}
-        aria-label={label}
-      />
+      {track}
     </div>
   )
 }
@@ -176,7 +219,7 @@ function SliderField({
  * restored on the way out if nothing was typed, so a stray click costs
  * nothing.
  */
-function ClearingInput({
+export function ClearingInput({
   value,
   onValueChange,
   ...props
@@ -320,79 +363,6 @@ function NumberField({
 }
 
 /**
- * Spells out which figures the rates are applied to, using the first year of
- * retirement. Only rendered once every money field has a value, since the
- * numbers are meaningless before that.
- */
-function TaxNote({ inputs }: { inputs: PlanDraft }) {
-  const complete = toPlanInputs(inputs)
-  const state = findState(inputs.taxState)
-  const combined = Math.round((inputs.federalTaxRate + inputs.stateTaxRate) * 10) / 10
-  const statusWord =
-    FILING_STATUSES.find((f) => f.value === inputs.filingStatus)?.short ?? 'single'
-
-  if (!complete) {
-    return (
-      <p className="text-xs text-muted-foreground leading-relaxed">
-        A combined <span className="font-medium text-foreground">{combined}%</span>{' '}
-        applies to withdrawals from your savings. Enter your figures to have the
-        rates worked out from a state&apos;s tax brackets.
-      </p>
-    )
-  }
-
-  // The rates above describe the first stretch of retirement. Read the rest
-  // from the phases, or the benefit would be reported from a year before it
-  // has started.
-  const phases = taxPhases(complete, inputs.taxState, inputs.filingStatus)
-  const withBenefit = phases.find((p) => p.rates.benefit > 0)
-  const rateOf = (p: (typeof phases)[number]) =>
-    Math.round((p.rates.federal + p.rates.state) * 10) / 10
-  const first = phases[0]
-  const changes = phases.length > 1 && first && withBenefit && rateOf(first) !== rateOf(withBenefit)
-
-  return (
-    <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">
-      <p>
-        <span className="font-medium text-foreground">{combined}% combined</span> —{' '}
-        {inputs.federalTaxRate}% federal and {inputs.stateTaxRate}%
-        {state ? ` ${state.name}` : ' state'}, effective rates from 2026 brackets
-        for a {statusWord} filer.
-        {changes ? (
-          <>
-            {' '}
-            That covers ages {first.fromAge}–{first.toAge}; from{' '}
-            {withBenefit.fromAge} it becomes{' '}
-            <span className="font-medium text-foreground">
-              {rateOf(withBenefit)}%
-            </span>
-            , and the projection applies each to its own years.
-          </>
-        ) : null}
-      </p>
-      {withBenefit && (
-        <p>
-          <span className="font-medium text-foreground">
-            {Math.round(withBenefit.rates.taxableShare * 100)}%
-          </span>{' '}
-          of your {formatCurrency(withBenefit.rates.benefit)} benefit counts as
-          ordinary income federally once it starts.
-          {state
-            ? state.taxesSocialSecurity
-              ? ` ${state.name} taxes it too.`
-              : ` ${state.name} does not tax it.`
-            : ''}
-        </p>
-      )}
-      <p>
-        The <span className="font-medium text-foreground">Tax tab</span> breaks this
-        down stretch by stretch.
-      </p>
-    </div>
-  )
-}
-
-/**
  * What the spending figure actually costs the portfolio.
  *
  * Spending is entered net — it is what you keep — so the withdrawal funding it
@@ -459,7 +429,7 @@ function SpouseBenefit({
   }
 
   return (
-    <div className="flex flex-col gap-4 border-t border-border pt-4">
+    <div className="flex flex-col gap-3 border-t border-border pt-3">
       {/* Asked rather than answered for them: filing jointly gets the joint
           brackets whether or not a second benefit was entered, so a zero here
           is more likely an unanswered question than an answer.
@@ -644,12 +614,14 @@ function AccountTaxNote({
 }
 
 /**
- * Spending that changes with age.
+ * Everything the household spends, and how it changes.
  *
- * Thirty years of one figure is the assumption nobody actually holds. Two
- * steps carry the shape people describe: more early while they are still
- * travelling, less once they slow down, often more again late when care
- * arrives. Left at 100% they change nothing at all.
+ * One component rather than a field here and a block there, because the three
+ * figures have to line up and a component boundary running between them is
+ * what kept stopping them. Each is a stage of the same retirement — what you
+ * spend at the start, what you spend after the first change, what you spend
+ * after the second — so they are three columns of one grid, and their boxes
+ * sit on one line because they are siblings in it.
  */
 function SpendingSteps({
   inputs,
@@ -678,9 +650,26 @@ function SpendingSteps({
     })
 
   return (
-    <div className="flex flex-col gap-4 border-t border-border pt-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <span className="text-sm text-muted-foreground">Spending as you age</span>
+    <div className="flex flex-col gap-3">
+
+      {/* Each link over the boxes it fills. The estimator works out the first
+          figure; the shape fills the two steps beside it. In a row of their
+          own below, neither stood over the thing it acts on, and the shape
+          link in particular read as belonging to the figure at the far left
+          that it never touches. Above the boxes it is an offer to fill them
+          in; underneath it would be a note about having filled them. */}
+      <div className="grid gap-x-5 gap-y-2 @xl:grid-cols-3">
+        <ExpenseEstimator
+          onApply={(monthly, healthFrom65) =>
+            // Two fields: the dialog works out a monthly figure and the part
+            // of it that does not start until Medicare does.
+            setMany({
+              monthlyRetirementSpending: monthly,
+              healthAfter65Monthly: healthFrom65,
+            })
+          }
+        />
+        {/* Spanning the two boxes it fills. */}
         <button
           type="button"
           onClick={
@@ -688,74 +677,92 @@ function SpendingSteps({
               ? () => setMany({ spendingStep1Monthly: 0, spendingStep2Monthly: 0 })
               : applySmile
           }
-          className="text-xs font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary/80"
+          className="w-fit rounded-sm text-xs font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring @xl:col-span-2"
         >
           {on ? 'Keep it level instead' : 'Use the usual shape'}
         </button>
       </div>
 
-      <SliderField
-        id="spendingStep1Age"
-        label="Changes at"
-        value={inputs.spendingStep1Age}
-        min={AGE_MIN}
-        max={AGE_MAX}
-        step={1}
-        onChange={(v) => set('spendingStep1Age', v)}
-      />
-      <NumberField
-        id="spendingStep1Monthly"
-        label="Spend this a month instead"
-        value={inputs.spendingStep1Monthly}
-        min={0}
-        max={100000}
-        step={100}
-        prefix="$"
-        placeholder="0 for no change"
-        onChange={(v) => set('spendingStep1Monthly', v ?? 0)}
-      />
-      <SliderField
-        id="spendingStep2Age"
-        label="Changes again at"
-        value={inputs.spendingStep2Age}
-        min={AGE_MIN}
-        max={AGE_MAX}
-        step={1}
-        onChange={(v) => set('spendingStep2Age', v)}
-      />
-      <NumberField
-        id="spendingStep2Monthly"
-        label="Then this a month"
-        value={inputs.spendingStep2Monthly}
-        min={0}
-        max={100000}
-        step={100}
-        prefix="$"
-        placeholder="0 for no change"
-        onChange={(v) => set('spendingStep2Monthly', v ?? 0)}
-      />
+      <div className="grid gap-x-5 gap-y-3 @xl:grid-cols-3">
+        <NumberField
+          id="monthlyRetirementSpending"
+          label="A month in retirement"
+          value={inputs.monthlyRetirementSpending}
+          min={0}
+          max={100000}
+          step={100}
+          prefix="$"
+          placeholder="e.g. 4,000"
+          onChange={(v) => set('monthlyRetirementSpending', v)}
+        />
+        <NumberField
+          id="spendingStep1Monthly"
+          label="Then this a month"
+          value={inputs.spendingStep1Monthly}
+          min={0}
+          max={100000}
+          step={100}
+          prefix="$"
+          placeholder="0 for no change"
+          onChange={(v) => set('spendingStep1Monthly', v ?? 0)}
+        />
+        <NumberField
+          id="spendingStep2Monthly"
+          label="And then this"
+          value={inputs.spendingStep2Monthly}
+          min={0}
+          max={100000}
+          step={100}
+          prefix="$"
+          placeholder="0 for no change"
+          onChange={(v) => set('spendingStep2Monthly', v ?? 0)}
+        />
 
-      <p className="text-xs text-muted-foreground leading-relaxed">
-        {!on ? (
-          <>
-            Both are at nothing, so spending holds level for the whole plan.
-            Enter an amount to spend more, or less, from that age.
-          </>
-        ) : base === null ? (
-          <>Enter a monthly figure above and the steps apply from these ages.</>
-        ) : (
-          <>
-            {money(base)} a month from {from}
-            {[
-              { age: inputs.spendingStep1Age, monthly: inputs.spendingStep1Monthly },
-              { age: inputs.spendingStep2Age, monthly: inputs.spendingStep2Monthly },
-            ]
-              .filter((s) => s.monthly > 0)
-              .sort((a, b) => a.age - b.age)
-              .map((s) => `, ${money(s.monthly)} from ${s.age}`)
-              .join('')}
-            . Today&apos;s dollars, so each figure holds its own buying power
-            from there.
+        {/* The row beneath: when each figure starts. The first needs no
+            control — it starts when work stops — so it says so in the space
+            the other two put a slider in, and the three columns stay level. */}
+        <span className="self-center text-xs text-muted-foreground">
+          From {from}, when you stop working
+        </span>
+        <SliderField
+          id="spendingStep1Age"
+          under
+          label="From"
+          value={inputs.spendingStep1Age}
+          min={AGE_MIN}
+          max={AGE_MAX}
+          step={1}
+          onChange={(v) => set('spendingStep1Age', v)}
+        />
+        <SliderField
+          id="spendingStep2Age"
+          under
+          label="From"
+          value={inputs.spendingStep2Age}
+          min={AGE_MIN}
+          max={AGE_MAX}
+          step={1}
+          onChange={(v) => set('spendingStep2Age', v)}
+        />
+      </div>
+
+      <p className="text-xs leading-relaxed text-muted-foreground">
+          {!on ? (
+            <>Leave both at nothing and spending holds level for the whole plan.</>
+          ) : base === null ? (
+            <>Enter a monthly figure and the steps apply from these ages.</>
+          ) : (
+            <>
+              {money(base)} a month from {from}
+              {[
+                { age: inputs.spendingStep1Age, monthly: inputs.spendingStep1Monthly },
+                { age: inputs.spendingStep2Age, monthly: inputs.spendingStep2Monthly },
+              ]
+                .filter((s) => s.monthly > 0)
+                .sort((a, b) => a.age - b.age)
+                .map((s) => `, ${money(s.monthly)} from ${s.age}`)
+                .join('')}
+              . Today&apos;s dollars throughout.
           </>
         )}
       </p>
@@ -922,8 +929,15 @@ function HealthCover({
   inputs: PlanDraft
   set: <K extends keyof PlanDraft>(key: K, value: PlanDraft[K]) => void
 }) {
-  const gap = Math.max(0, MEDICARE_AGE - Math.max(inputs.retirementAge, inputs.currentAge))
-  if (gap <= 0) return null
+  const startAge = Math.max(inputs.retirementAge, inputs.currentAge)
+  const gap = Math.max(0, MEDICARE_AGE - startAge)
+  // Retiring at 65 or later used to remove this section outright. It was the
+  // right answer to the wrong question: there is nothing to buy for yourself,
+  // but Medicare is not free either, and a section that simply is not there
+  // reads as an app with nothing to say about health rather than an app that
+  // has checked. It stays, says why the first half does not apply, and keeps
+  // the half that always does.
+  const alreadyOnIt = inputs.currentAge >= MEDICARE_AGE
 
   const options = [
     { value: 'marketplace' as const, label: 'Marketplace' },
@@ -932,18 +946,53 @@ function HealthCover({
   ]
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-      <div className="flex flex-col gap-0.5">
-        <Label className="text-sm text-foreground">
-          Health cover until Medicare
-        </Label>
-        <span className="text-xs text-muted-foreground text-pretty">
-          You stop at {Math.max(inputs.retirementAge, inputs.currentAge)} and
-          Medicare starts at {MEDICARE_AGE}, so {gap}{' '}
-          {gap === 1 ? 'year needs' : 'years need'} covering.
-        </span>
-      </div>
+    <Section
+      defaultOpen
+      title="Health cover and who is on it"
+      summary={coverSummary(inputs)}
+      info={
+        <>
+          <p>
+            The years between stopping work and Medicare have to be paid for
+            somehow, and for most people this is the largest single cost in
+            them. It used to sit inside Spending, where it was a box nobody
+            found; it has its own section because it is its own decision.
+          </p>
+          <Field name="Marketplace">
+            priced from each year&apos;s own income, subsidy and all. Nothing
+            to enter, and nothing to add to your spending figure.
+          </Field>
+          <Field name="A plan of my own">
+            a retiree plan, COBRA, or a spouse&apos;s cover. Charged at what
+            you enter, whatever your income does.
+          </Field>
+          <Field name="Children or others on your plan">
+            everyone on a marketplace plan raises two things at once: the
+            income limit before the subsidy stops, and what the plan costs.
+            Entered as birth years, because each person comes off in their own
+            year.
+          </Field>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2">
+        {gap > 0 ? (
+          <span className="text-xs text-muted-foreground text-pretty">
+            You stop at {startAge} and Medicare starts at {MEDICARE_AGE}, so{' '}
+            {gap} {gap === 1 ? 'year needs' : 'years need'} covering.
+          </span>
+        ) : (
+          <p className="text-xs text-muted-foreground text-pretty">
+            {alreadyOnIt
+              ? `You are ${inputs.currentAge}, so Medicare already covers you.`
+              : `You work to ${startAge} and Medicare starts at ${MEDICARE_AGE}, so there are no years to buy cover for.`}{' '}
+            Nothing to choose here — the marketplace, its subsidy and the
+            income limit that goes with it never come into this plan. What
+            Medicare itself costs still does, below.
+          </p>
+        )}
 
+      {gap > 0 && (
       <div className="grid grid-cols-3 gap-1 rounded-md bg-muted/60 p-1">
         {options.map((o) => (
           <button
@@ -962,15 +1011,19 @@ function HealthCover({
           </button>
         ))}
       </div>
-
-      {inputs.healthCoverBefore65 === 'marketplace' && (
-        <p className="text-xs text-muted-foreground text-pretty">
-          Worked out for you each year from that year&apos;s own income —
-          subsidy included, and charged on top of your spending. Nothing to
-          enter, and nothing to put in the spending figure.
-        </p>
       )}
-      {inputs.healthCoverBefore65 === 'own' && (
+
+      {gap > 0 && inputs.healthCoverBefore65 === 'marketplace' && (
+        <>
+          <p className="text-xs text-muted-foreground text-pretty">
+            Worked out for you each year from that year&apos;s own income —
+            subsidy included, and charged on top of your spending. Nothing to
+            enter, and nothing to put in the spending figure.
+          </p>
+          <Dependents inputs={inputs} set={set} />
+        </>
+      )}
+      {gap > 0 && inputs.healthCoverBefore65 === 'own' && (
         <NumberField
           id="healthPremiumMonthly"
           label="What it costs a month (today's $)"
@@ -983,139 +1036,74 @@ function HealthCover({
           onChange={(v) => set('healthPremiumMonthly', v ?? 0)}
         />
       )}
-      {inputs.healthCoverBefore65 === 'none' && (
+      {gap > 0 && inputs.healthCoverBefore65 === 'none' && (
         <p className="text-xs text-muted-foreground text-pretty">
           Nothing is charged for cover before {MEDICARE_AGE}. Right for cover a
           former employer pays for, and wrong if you are simply unsure — the
           marketplace figure is the safer answer in that case.
         </p>
       )}
-    </div>
-  )
-}
 
-/**
- * Where tax comes from, which is now only one place.
- *
- * There used to be a choice here: derive the rates from the brackets, or type
- * a flat pair in yourself. Nought of a hundred saved plans ever took the
- * second, and taking it silently switched the projection onto a levy that
- * could not tell a Roth dollar from a 401(k) one. A branch nobody used, that
- * quietly made the answer worse, is not an escape hatch — it is a trap with a
- * label on it. Both the option and the engine behind it are gone.
- */
-function TaxSettings({
-  inputs,
-  onChange,
-}: {
-  inputs: PlanDraft
-  onChange: (next: PlanDraft) => void
-}) {
-  return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="filingStatus" className="text-sm text-muted-foreground">
-            Filing status
-          </Label>
-          <select
-            id="filingStatus"
-            value={inputs.filingStatus}
-            onChange={(e) =>
-              onChange(
-                withDerivedRates({
-                  ...inputs,
-                  filingStatus: e.target.value as PlanDraft['filingStatus'],
-                }),
-              )
-            }
-            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
-          >
-            {FILING_STATUSES.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <DerivedRate
-          label="Federal tax rate"
-          value={inputs.federalTaxRate}
-          note="worked out from the brackets"
+        <NumberField
+          id="healthAfter65Monthly"
+          label={`What Medicare costs a month from ${MEDICARE_AGE} (today's $)`}
+          value={inputs.healthAfter65Monthly}
+          min={0}
+          max={2000}
+          step={10}
+          prefix="$"
+          placeholder="e.g. 300"
+          onChange={(v) => set('healthAfter65Monthly', v ?? 0)}
         />
-      </div>
-
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="taxState" className="text-sm text-muted-foreground">
-            State
-          </Label>
-          <select
-            id="taxState"
-            value={inputs.taxState}
-            onChange={(e) =>
-              onChange(withDerivedRates({ ...inputs, taxState: e.target.value }))
-            }
-            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm text-foreground focus:border-ring focus:outline-none"
-          >
-            <option value="">No state income tax</option>
-            {STATE_TAXES.map((st) => (
-              <option key={st.code} value={st.code}>
-                {st.name}
-                {st.note ? ` — ${st.note}` : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-        <DerivedRate
-          label="State tax rate"
-          value={inputs.stateTaxRate}
-          note={
-            findState(inputs.taxState)
-              ? 'worked out from the state brackets'
-              : 'no state chosen, so none is charged'
-          }
-        />
-      </div>
-
-      <TaxNote inputs={inputs} />
-    </div>
-  )
-}
-
-/**
- * A rate the plan worked out, shown as a figure rather than a control.
- *
- * These two were sliders, and they were the only sliders on the page that did
- * not set anything: `withDerivedRates` recomputes both on every edit and on
- * load, so whatever was dragged was overwritten by the next keystroke. What
- * dragging one *did* do was silently set the state to Custom, which switches
- * the projection off the brackets and onto a flat levy — on one test plan the
- * difference between $158,000 and $962,000 of lifetime tax. A control that
- * looks like a refinement and is really an off switch for the tax engine is
- * worse than no control, so the flat path now has to be chosen by name, from
- * the State list, where it is labelled.
- */
-function DerivedRate({
-  label,
-  value,
-  note,
-}: {
-  label: string
-  value: number
-  note: string
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="flex items-baseline gap-2">
-        <span className="text-lg font-semibold tabular-nums text-foreground">
-          {Math.round(value * 10) / 10}%
+        <span className="text-xs text-muted-foreground text-pretty">
+          {/* Reachable only through the spending estimator until now, which
+              meant anybody who already knew this figure had to walk through a
+              dialog of questions to enter it. */}
+          Part B, a Medigap or Advantage plan, Part D and dental — everything
+          Medicare costs that is not the income surcharge, which the plan works
+          out for itself. Leave it at zero if your spending figure already
+          covers it.
         </span>
-        <span className="text-xs text-muted-foreground text-pretty">{note}</span>
-      </span>
-    </div>
+      </div>
+    </Section>
   )
+}
+
+/**
+ * What the section says while it is shut.
+ *
+ * The reason for moving this out of Spending was that nobody found it, so the
+ * closed state has to carry enough to make somebody open it: which choice is
+ * in force, and who it covers.
+ */
+function coverSummary(inputs: PlanDraft): string {
+  const from65 =
+    inputs.healthAfter65Monthly > 0
+      ? `${formatCurrency(inputs.healthAfter65Monthly)} a month from ${MEDICARE_AGE}`
+      : ''
+  const gap = MEDICARE_AGE - Math.max(inputs.retirementAge, inputs.currentAge)
+
+  // No years to cover means there is no choice to report, and the summary
+  // should say that rather than name a setting that never applies.
+  if (gap <= 0) return from65 || 'Medicare from the start'
+
+  const before =
+    inputs.healthCoverBefore65 === 'none'
+      ? 'Costs me nothing'
+      : inputs.healthCoverBefore65 === 'own'
+        ? `My own plan, ${formatCurrency(inputs.healthPremiumMonthly)} a month`
+        : marketplaceWho(inputs)
+  return from65 ? `${before} · ${from65}` : before
+}
+
+/** Who the marketplace plan covers, which is what decides the income limit. */
+function marketplaceWho(inputs: PlanDraft): string {
+  const others = inputs.dependentBirthYears.length
+  if (others > 0)
+    return `Marketplace, ${others} ${others === 1 ? 'other person' : 'others'} on it`
+  return `Marketplace, ${
+    inputs.filingStatus === 'married' ? 'you and your spouse' : 'just you'
+  }`
 }
 
 function WithdrawalNote({
@@ -1315,7 +1303,13 @@ function Section({
         )}
         <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
-      <div className="pb-4">{children}</div>
+      {/* A query container, so the field grid inside measures this tile and
+          not the window. The same section markup sits in a third of the page
+          in the top row and across the whole of it below, and a viewport
+          breakpoint cannot tell those apart — it would put two fields side by
+          side in a 440px column and leave three-quarters of a full-width row
+          empty. */}
+      <div className="@container pb-4">{children}</div>
     </details>
   )
 }
@@ -1323,17 +1317,12 @@ function Section({
 export function PlanInputsPanel({
   inputs,
   onChange,
-  name,
-  onNameChange,
   medianAtRetirement,
   personName,
   onPersonNameChange,
-  saveButton,
 }: {
   inputs: PlanDraft
   onChange: (next: PlanDraft) => void
-  name: string
-  onNameChange: (next: string) => void
   /**
    * The middle of the simulated runs, from the panel above. Quoted rather than
    * the single fixed-return path, because that path ignores volatility drag
@@ -1344,7 +1333,6 @@ export function PlanInputsPanel({
   personName: string
   onPersonNameChange: (next: string) => void
   /** Owned by the planner, which holds the saving state; placed here. */
-  saveButton: React.ReactNode
 }) {
   const set = <K extends keyof PlanDraft>(key: K, value: PlanDraft[K]) =>
     onChange(withDerivedRates({ ...inputs, [key]: value }))
@@ -1377,90 +1365,72 @@ export function PlanInputsPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Who the plan is for, and what it is called. The name and the button
-          that stores it belong to the plan itself, so they live in the plan's
-          own tile rather than floating above the panel. Deliberately not
-          collapsible: saving should never be a click away behind a closed
-          section. */}
-      <div className="rounded-lg border-2 border-border px-4 py-3">
-        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <Label
-              htmlFor="personName"
-              className="text-xs font-bold uppercase tracking-wider text-foreground"
-            >
-              Personal info
-            </Label>
-            <ClearingInput
-              id="personName"
-              value={personName}
-              onValueChange={onPersonNameChange}
-              placeholder="Your name"
-              autoComplete="name"
-              maxLength={120}
-              // Reads as the heading of the plan until it is clicked, which is
-              // the point: this is who the plan is for, not a form field to
-              // get past. Never required — the plan works unnamed.
-              className="h-auto w-full max-w-sm truncate rounded-md border-transparent bg-transparent px-0 py-0.5 font-serif text-xl font-medium shadow-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-input focus-visible:bg-background focus-visible:px-2 md:text-xl"
+      {/* The heading sits here rather than in the card above, so the two ages
+          can stand beside it.
+
+          They had a bordered row of their own, three columns wide with two
+          things in it — a band of border and empty space across the top of the
+          page for two sliders. Beside the heading they cost no row at all, and
+          they belong there: the shape of the retirement is what the rest of
+          this panel is filling in.
+
+          Age itself is asked once, above the tabs. It belongs to the person
+          rather than to a scenario, and a saved plan keeping its own copy
+          would go on projecting from an age its owner had passed. */}
+      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="font-serif text-xl font-medium text-foreground">
+            Your assumptions
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Open a section to adjust it. Everything below updates as you type.
+          </p>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-wrap gap-x-6 gap-y-4 sm:flex-nowrap sm:justify-end">
+          <div className="w-full min-w-40 sm:w-44">
+            <SliderField
+              id="retirementAge"
+              label="Retirement age"
+              value={inputs.retirementAge}
+              min={AGE_MIN}
+              max={AGE_MAX}
+              step={1}
+              onChange={(v) => setAge('retirementAge', v)}
             />
           </div>
-          {/* The plan's own name sits with the button that stores it, since
-              naming a plan and saving it are one action. */}
-          {/* Full width on a phone so the field can shrink beside the button
-              instead of pushing it off the tile. */}
-          <div className="flex w-full items-end gap-2 sm:w-auto">
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-none">
-              <Label htmlFor="planName" className="text-xs text-muted-foreground">
-                Plan name
-              </Label>
-              <ClearingInput
-                id="planName"
-                value={name}
-                onValueChange={onNameChange}
-                placeholder="Name this plan"
-                maxLength={120}
-                className="h-9 w-full sm:w-44"
-              />
-            </div>
-            {saveButton}
+          <div className="w-full min-w-40 sm:w-44">
+            <SliderField
+              id="endAge"
+              label="Plan through age"
+              value={inputs.endAge}
+              min={AGE_MIN}
+              max={AGE_MAX}
+              step={1}
+              onChange={(v) => setAge('endAge', v)}
+            />
           </div>
-        </div>
-        <div className="mt-3 grid gap-x-6 gap-y-4 border-t border-border pt-4 md:grid-cols-3">
-          <SliderField
-            id="currentAge"
-            label="Current age"
-            value={inputs.currentAge}
-            min={AGE_MIN}
-            max={AGE_MAX}
-            step={1}
-            onChange={(v) => setAge('currentAge', v)}
-          />
-          <SliderField
-            id="retirementAge"
-            label="Retirement age"
-            value={inputs.retirementAge}
-            min={AGE_MIN}
-            max={AGE_MAX}
-            step={1}
-            onChange={(v) => setAge('retirementAge', v)}
-          />
-          <SliderField
-            id="endAge"
-            label="Plan through age"
-            value={inputs.endAge}
-            min={AGE_MIN}
-            max={AGE_MAX}
-            step={1}
-            onChange={(v) => setAge('endAge', v)}
-          />
         </div>
       </div>
 
-      {/* Social Security and Other income stack into one column: both are
-          short, and together they are the income arriving without a
-          withdrawal. Taxes is far wider than the rest and takes its own row. */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <div className="flex flex-col gap-4">
+      {/* Sorted by size rather than by subject. The three short sections tile
+          across the top — Social Security, Other income and health cover, which
+          between them are the money arriving without a withdrawal and the
+          outgoing that shadows it — and Saving and Spending take a full row
+          each below.
+
+          Columns of unequal length were the problem: three short sections
+          stacked beside two long ones left the first column ending half a
+          screen early, and gave the two sections with the most fields the least
+          room to lay them out in. A section on its own row is as wide as the
+          page and can put its fields three across.
+
+          The field grids inside are container queries, not viewport ones, so a
+          tile in the top row lays its fields out for a third of the page while
+          Saving lays the same markup out for all of it. The Taxes tile that
+          used to take its own row is gone — filing status and state are asked
+          once in "About you". */}
+      <div className="flex flex-col gap-4">
+        <div className="grid gap-4 lg:grid-cols-3">
           <Section
             defaultOpen
             title="Social Security"
@@ -1509,7 +1479,7 @@ export function PlanInputsPanel({
                   : `${money(inputs.socialSecurityMonthly)} a month from ${inputs.socialSecurityAge}`
             }
           >
-            <div className="flex flex-col gap-4">
+            <div className="grid gap-4 @lg:grid-cols-2 @4xl:grid-cols-3">
             <NumberField
               id="socialSecurityMonthly"
               label="Monthly benefit at 67 (today's $)"
@@ -1540,7 +1510,7 @@ export function PlanInputsPanel({
               suffix="%"
               onChange={(v) => set('socialSecurityCola', v)}
             />
-            <SpouseBenefit inputs={inputs} set={set} />
+            <div className="col-span-full"><SpouseBenefit inputs={inputs} set={set} /></div>
             {inputs.socialSecurityMonthly !== null && (
               <p className="text-xs text-muted-foreground leading-relaxed">
                 Claiming at {inputs.socialSecurityAge} pays{' '}
@@ -1616,7 +1586,7 @@ export function PlanInputsPanel({
                     .join(', ')
             }
           >
-            <div className="flex flex-col gap-4">
+            <div className="grid gap-4 @lg:grid-cols-2 @4xl:grid-cols-3">
               <NumberField
                 id="pensionMonthly"
                 label="Monthly pension (today's $)"
@@ -1678,6 +1648,8 @@ export function PlanInputsPanel({
               )}
             </div>
           </Section>
+
+          <HealthCover inputs={inputs} set={set} />
         </div>
 
         <Section
@@ -1694,8 +1666,9 @@ export function PlanInputsPanel({
                 an ordinary investment account, taxed as you go. The plan spends
                 it first, because most of it has already been taxed once.
               </Field>
-              <Field name="…of which is gain">
-                how much of that balance is profit rather than money you put in.
+              <Field name="How much is profit">
+                how much of the brokerage balance is profit rather than money
+                you put in.
                 When you sell, only the profit is taxed — and at lower
                 capital-gains rates, sometimes at nothing. A $200,000 account you
                 paid $120,000 for is 40% gain. Your brokerage shows this as{' '}
@@ -1763,39 +1736,40 @@ export function PlanInputsPanel({
                   (inputs.rothIraBalance ?? 0),
           )} saved, ${money(inputs.monthlyContribution)} a month`}
         >
-          <div className="flex flex-col gap-4">
-          <NumberField
-            id="brokerageBalance"
-            label="Brokerage account"
-            value={inputs.brokerageBalance}
-            min={0}
-            max={100000000}
-            step={1000}
-            prefix="$"
-            placeholder="e.g. 25,000"
-            onChange={(v) => set('brokerageBalance', v)}
-          />
-          <SliderField
-            id="brokerageGainShare"
-            label="…of which is gain"
-            value={inputs.brokerageGainShare}
-            min={0}
-            max={100}
-            step={1}
-            suffix="%"
-            onChange={(v) => set('brokerageGainShare', v)}
-          />
-          <NumberField
-            id="balance401k"
-            label="401(k)"
-            value={inputs.balance401k}
-            min={0}
-            max={100000000}
-            step={1000}
-            prefix="$"
-            placeholder="e.g. 100,000"
-            onChange={(v) => set('balance401k', v)}
-          />
+          <div className="grid gap-4 @lg:grid-cols-2 @4xl:grid-cols-3">
+          {/* The share is a share *of* this balance, so it sits under it. */}
+          <div className="flex flex-col gap-2">
+            <NumberField
+              id="brokerageBalance"
+              label="Brokerage account"
+              value={inputs.brokerageBalance}
+              min={0}
+              max={100000000}
+              step={1000}
+              prefix="$"
+              placeholder="e.g. 25,000"
+              onChange={(v) => set('brokerageBalance', v)}
+            />
+            <SliderField
+              id="brokerageGainShare"
+              under
+              // Said on its own, not as the tail of the label above it. The
+              // ellipsis was a continuation — "Brokerage account … of which is
+              // gain" — which only reads when the two sit one directly under the
+              // other, and they no longer do: the fields lay out two across now,
+              // so this one can as easily be beside its own account as beneath
+              // it. It also carries the aria label, where half a sentence
+              // beginning in an ellipsis is nothing at all.
+              label="How much is profit"
+              value={inputs.brokerageGainShare}
+              min={0}
+              max={100}
+              step={1}
+              suffix="%"
+              onChange={(v) => set('brokerageGainShare', v)}
+            />
+          </div>
+
           <NumberField
             id="traditionalIraBalance"
             label="Traditional IRA"
@@ -1818,101 +1792,147 @@ export function PlanInputsPanel({
             placeholder="e.g. 40,000"
             onChange={(v) => set('rothIraBalance', v)}
           />
-          <AccountNote inputs={inputs} />
-          <NumberField
-            id="monthlyContribution"
-            label="Monthly contribution"
-            value={inputs.monthlyContribution}
-            min={0}
-            max={100000}
-            step={50}
-            prefix="$"
-            placeholder="e.g. 800"
-            onChange={(v) => set('monthlyContribution', v)}
-          />
-          {/* Optional, and grouped after the contribution they modify. A plan
-              that says nothing here behaves exactly as it did before they
-              existed: no salary means no match, and no HSA means no fourth
-              pot. */}
-          <NumberField
-            id="hsaBalance"
-            label="HSA balance"
-            value={inputs.hsaBalance}
-            min={0}
-            max={100000000}
-            step={1000}
-            prefix="$"
-            placeholder="Optional"
-            onChange={(v) => set('hsaBalance', v ?? 0)}
-          />
-          <NumberField
-            id="hsaMonthlyContribution"
-            label="Monthly into the HSA"
-            value={inputs.hsaMonthlyContribution}
-            min={0}
-            max={10000}
-            step={25}
-            prefix="$"
-            placeholder="Optional"
-            onChange={(v) => set('hsaMonthlyContribution', v ?? 0)}
-          />
-          <NumberField
-            id="annualSalary"
-            label="Annual salary"
-            value={inputs.annualSalary}
-            min={0}
-            max={100000000}
-            step={1000}
-            prefix="$"
-            placeholder="Optional, for the match"
-            onChange={(v) => set('annualSalary', v ?? 0)}
-          />
-          <SliderField
-            id="employerMatchPercent"
-            label="Employer matches"
-            value={inputs.employerMatchPercent}
-            min={0}
-            max={100}
-            step={5}
-            suffix="%"
-            onChange={(v) => set('employerMatchPercent', v)}
-          />
-          <SliderField
-            id="employerMatchLimitPercent"
-            label="…up to this much of salary"
-            value={inputs.employerMatchLimitPercent}
-            min={0}
-            max={25}
-            step={0.5}
-            suffix="%"
-            onChange={(v) => set('employerMatchLimitPercent', v)}
-          />
-          <SliderField
-            id="preRetirementReturn"
-            label="Return while saving (nominal)"
-            value={inputs.preRetirementReturn}
-            min={0}
-            max={12}
-            step={0.1}
-            suffix="%"
-            onChange={(v) => set('preRetirementReturn', v)}
-          />
-          <SliderField
-            id="preRetirementVolatility"
-            label="Volatility while saving"
-            value={inputs.preRetirementVolatility}
-            min={0}
-            max={30}
-            step={0.5}
-            suffix="%"
-            onChange={(v) => set('preRetirementVolatility', v)}
-          />
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            How much your returns rise and fall from year to year. About 15% for a
-            mostly-stocks portfolio, or 10% for a balanced one. A higher number does
-            not change your average return — it just makes the result less
-            predictable.
-          </p>
+
+          {/* One account and everything that feeds it, across the whole row.
+
+              The balance, what goes in each month and the salary the match is
+              measured against are three facts of the same size, so they sit in
+              a row of three. The two sliders hang beneath all of them, because
+              the match is worked out from the contribution and the salary both
+              — `employerMatch` and the monthly contribution land in the same
+              deferred pot, and the salary is read for nothing but the limit. */}
+          <div className="col-span-full flex flex-col gap-3">
+            <div className="grid gap-4 @lg:grid-cols-3">
+              <NumberField
+                id="balance401k"
+                label="401(k)"
+                value={inputs.balance401k}
+                min={0}
+                max={100000000}
+                step={1000}
+                prefix="$"
+                placeholder="e.g. 100,000"
+                onChange={(v) => set('balance401k', v)}
+              />
+              <NumberField
+                id="monthlyContribution"
+                label="Monthly contribution"
+                value={inputs.monthlyContribution}
+                min={0}
+                max={100000}
+                step={50}
+                prefix="$"
+                placeholder="e.g. 800"
+                onChange={(v) => set('monthlyContribution', v)}
+              />
+              <NumberField
+                id="annualSalary"
+                label="Annual salary"
+                value={inputs.annualSalary}
+                min={0}
+                max={100000000}
+                step={1000}
+                prefix="$"
+                placeholder="Optional, for the match"
+                onChange={(v) => set('annualSalary', v ?? 0)}
+              />
+            </div>
+            {/* Side by side, and lettered exactly as the share under the
+                brokerage box is: all three are footnotes to a box above. */}
+            <div className="grid gap-x-6 gap-y-2 @lg:grid-cols-2">
+              <SliderField
+                id="employerMatchPercent"
+                under
+                label="Employer matches"
+                value={inputs.employerMatchPercent}
+                min={0}
+                max={100}
+                step={5}
+                suffix="%"
+                onChange={(v) => set('employerMatchPercent', v)}
+              />
+              <SliderField
+                id="employerMatchLimitPercent"
+                under
+                label="…up to this much of salary"
+                value={inputs.employerMatchLimitPercent}
+                min={0}
+                max={25}
+                step={0.5}
+                suffix="%"
+                onChange={(v) => set('employerMatchLimitPercent', v)}
+              />
+            </div>
+          </div>
+          {/* One account: what is in it, and what goes into it. */}
+          {/* Side by side, and across the row: they are two figures about
+              one account, the same shape as the 401(k) row above. Stacked in
+              a third of a column they read as two accounts. */}
+          <div className="col-span-full grid gap-4 @lg:grid-cols-3">
+            <NumberField
+              id="hsaBalance"
+              label="HSA balance"
+              value={inputs.hsaBalance}
+              min={0}
+              max={100000000}
+              step={1000}
+              prefix="$"
+              placeholder="Optional"
+              onChange={(v) => set('hsaBalance', v ?? 0)}
+            />
+            <NumberField
+              id="hsaMonthlyContribution"
+              label="Monthly into the HSA"
+              value={inputs.hsaMonthlyContribution}
+              min={0}
+              max={10000}
+              step={25}
+              prefix="$"
+              placeholder="Optional"
+              onChange={(v) => set('hsaMonthlyContribution', v ?? 0)}
+            />
+          </div>
+          <div className="col-span-full"><AccountNote inputs={inputs} /></div>
+          {/* A rate and how far it swings: one assumption in two parts. */}
+          {/* The market assumptions, in a row of their own. They are not an
+              account, and sitting in the column beside one implied they were
+              a property of it. */}
+          <div className="col-span-full flex flex-col gap-2">
+            <div className="grid gap-x-6 gap-y-2 @lg:grid-cols-2">
+              <SliderField
+                id="preRetirementReturn"
+                label="Return while saving (nominal)"
+                value={inputs.preRetirementReturn}
+                min={0}
+                max={12}
+                step={0.1}
+                suffix="%"
+                onChange={(v) => set('preRetirementReturn', v)}
+              />
+              {/* The note belongs to this slider, so it sits in this column
+                  under it. Spanning both columns put an explanation of
+                  volatility directly beneath the return slider too, where it
+                  read as describing whichever of the two the eye landed on. */}
+              <div className="flex flex-col gap-2">
+                <SliderField
+                  id="preRetirementVolatility"
+                  label="Volatility while saving"
+                  value={inputs.preRetirementVolatility}
+                  min={0}
+                  max={30}
+                  step={0.5}
+                  suffix="%"
+                  onChange={(v) => set('preRetirementVolatility', v)}
+                />
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  How much your returns rise and fall from year to year. About 15% for a
+                  mostly-stocks portfolio, or 10% for a balanced one. A higher number does
+                  not change your average return — it just makes the result less
+                  predictable.
+                </p>
+              </div>
+            </div>
+          </div>
           </div>
         </Section>
 
@@ -1958,116 +1978,179 @@ export function PlanInputsPanel({
           }
           summary={`${money(inputs.monthlyRetirementSpending)} a month in retirement`}
         >
+          {/* Two columns rather than three stacked bands. The figure and
+              the assumptions it is measured against on the left, the steps
+              that change it over time on the right — which fills a row that
+              was carrying one field, and leaves the two sides about level.
+
+              The assumptions keep a rule and a heading of their own inside
+              that column. They are not spending, and without something to
+              mark them off, sitting under the spending box is exactly the
+              association pulling them into their own band was meant to
+              break. */}
           <div className="flex flex-col gap-4">
-          <NumberField
-            id="monthlyRetirementSpending"
-            label="Monthly spending in retirement (today's $)"
-            value={inputs.monthlyRetirementSpending}
-            min={0}
-            max={100000}
-            step={100}
-            prefix="$"
-            placeholder="e.g. 4,000"
-            onChange={(v) => set('monthlyRetirementSpending', v)}
-          />
-          {/* For anyone who knows what their life costs but not the total. */}
-          <ExpenseEstimator
-            onApply={(monthly, healthFrom65) => {
-              // Two fields, because the dialog now produces two figures: the
-              // health part does not start until Medicare does.
-              onChange({
-                ...inputs,
-                monthlyRetirementSpending: monthly,
-                healthAfter65Monthly: healthFrom65,
-              })
-            }}
-          />
-          <HealthCover inputs={inputs} set={set} />
-          <WithdrawalNote inputs={inputs} median={medianAtRetirement} />
-          <SpendingSteps inputs={inputs} set={set} setMany={setMany} />
-          <SliderField
-            id="postRetirementReturn"
-            label="Return in retirement (nominal)"
-            value={inputs.postRetirementReturn}
-            min={0}
-            max={10}
-            step={0.1}
-            suffix="%"
-            onChange={(v) => set('postRetirementReturn', v)}
-          />
-          <SliderField
-            id="postRetirementVolatility"
-            label="Volatility in retirement"
-            value={inputs.postRetirementVolatility}
-            min={0}
-            max={30}
-            step={0.5}
-            suffix="%"
-            onChange={(v) => set('postRetirementVolatility', v)}
-          />
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Usually lower than while you are working, because most people move to
-            safer investments in retirement — about 8%. It matters more here,
-            because a bad year hits while you are taking money out.
-          </p>
-          <SliderField
-            id="inflationRate"
-            label="Inflation rate"
-            value={inputs.inflationRate}
-            min={0}
-            max={8}
-            step={0.1}
-            suffix="%"
-            onChange={(v) => set('inflationRate', v)}
-          />
+            <SpendingSteps inputs={inputs} set={set} setMany={setMany} />
+
+            {/* What the market does, ruled off below the figures. It is not
+                spending — it is what the spending is measured against — and
+                three sliders across a full row is the whole of it. */}
+            <div className="grid gap-x-5 gap-y-3 border-t border-border pt-4 @xl:grid-cols-3">
+            <SliderField
+              id="postRetirementReturn"
+              label="Return in retirement (nominal)"
+              value={inputs.postRetirementReturn}
+              min={0}
+              max={10}
+              step={0.1}
+              suffix="%"
+              onChange={(v) => set('postRetirementReturn', v)}
+            />
+            <div className="flex flex-col gap-2">
+              <SliderField
+                id="postRetirementVolatility"
+                label="Volatility in retirement"
+                value={inputs.postRetirementVolatility}
+                min={0}
+                max={30}
+                step={0.5}
+                suffix="%"
+                onChange={(v) => set('postRetirementVolatility', v)}
+              />
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Usually lower than while you are working, because most people move to
+                safer investments in retirement — about 8%. It matters more here,
+                in case a bad year comes while you are taking money out.
+              </p>
+            </div>
+            <SliderField
+              id="inflationRate"
+              label="Inflation rate"
+              value={inputs.inflationRate}
+              min={0}
+              max={8}
+              step={0.1}
+              suffix="%"
+              onChange={(v) => set('inflationRate', v)}
+            />
+            </div>
+
+            <WithdrawalNote inputs={inputs} median={medianAtRetirement} />
           </div>
         </Section>
       </div>
 
-      <Section
-        defaultOpen
-        title="Taxes"
-        info={
-          <>
-            <Field name="State">
-              pick one and the planner works the rates out from the real
-              brackets, year by year — federal and state, including how much of
-              your Social Security becomes taxable and what your capital gains
-              cost.
-            </Field>
-            <Field name="Filing status">
-              matters more than people expect. Married brackets are roughly
-              twice as wide, and so are the thresholds for Medicare surcharges
-              and for the health-insurance subsidy before 65.
-            </Field>
-            <Field name="Federal and state tax rate">
-              a readout, not a setting. Both are what the brackets and your
-              state came to on the figures you entered, so they move as those
-              figures do — the projection works tax out year by year and by the
-              account each dollar came from, rather than applying a rate.
-            </Field>
-            <Field name="What state tax leaves out">
-              a state is priced from its brackets and standard deduction only.
-              Credits and exemptions aimed at retirees — low-income credits,
-              age-based exclusions, deductions on pension income — are not
-              counted, so the state figures err high, and highest for the
-              lowest incomes. Federal tax, the bigger number, is unaffected.
-            </Field>
-            <p>
-              The rates shown are{' '}
-              <span className="font-medium text-foreground">effective</span>, not
-              your top bracket: tax owed divided by the whole withdrawal. The
-              standard deduction and the lower bands are taxed first, so a plan
-              showing 12% can easily be one whose top bracket is 22%.
-            </p>
-          </>
-        }
-        summary={`${
-          Math.round((inputs.federalTaxRate + inputs.stateTaxRate) * 10) / 10
-        }% combined${findState(inputs.taxState) ? `, ${findState(inputs.taxState)!.name}` : ''}`}
-      >
-        <TaxSettings inputs={inputs} onChange={onChange} />
-      </Section>
+        {/* The Taxes tile is gone. Filing status and state moved to "About
+            you", where they are asked once for the household; the two rates
+            it showed are readouts of what the brackets came to, and the Tax
+            tab reports them per phase with the working beside them. What is
+            left of a tile once its inputs move out and its figures are shown
+            better elsewhere is a heading. */}
+    </div>
+  )
+}
+
+/**
+ * Children or others on the household's health plan.
+ *
+ * Asked only for marketplace cover, because it is the only thing that reads
+ * it. Each person moves two figures at once: the income limit for the subsidy
+ * rises with the size of the household, and so does the premium.
+ *
+ * Birth years rather than ages. An age typed today is a fact with a shelf life
+ * — a plan saved saying "14" quietly means something else two years later —
+ * and it is the year, not the age, that decides when they come off. Asking for
+ * years is also what lets two children leave in two different years without
+ * anybody having to say so.
+ */
+function Dependents({
+  inputs,
+  set,
+}: {
+  inputs: PlanDraft
+  set: <K extends keyof PlanDraft>(key: K, value: PlanDraft[K]) => void
+}) {
+  const years = inputs.dependentBirthYears
+  const thisYear = new Date().getFullYear()
+  const update = (next: number[]) => set('dependentBirthYears', next)
+
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-border/60 p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium">
+          {/* "Children" first, because that is the word somebody scanning for
+              this is looking for. "Others" alone described the field
+              accurately and matched nothing anybody would search. */}
+          Children or others on your plan
+        </span>
+        <button
+          type="button"
+          onClick={() => update([...years, thisYear - 10])}
+          className="text-xs font-medium text-primary hover:underline"
+        >
+          {years.length === 0 ? '+ Add a child' : '+ Add another'}
+        </button>
+      </div>
+
+      {years.length === 0 ? (
+        <p className="text-xs text-muted-foreground text-pretty">
+          Just you{inputs.filingStatus === 'married' ? ' and your spouse' : ''}{' '}
+          on the plan. If a child or anyone else is covered by it, add them —
+          each person raises the income you can have before the subsidy stops,
+          and raises what the plan costs.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-col gap-1.5">
+            {years.map((year, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <label
+                  htmlFor={`dependent-${i}`}
+                  className="shrink-0 text-xs text-muted-foreground"
+                >
+                  Born in
+                </label>
+                <input
+                  id={`dependent-${i}`}
+                  type="number"
+                  inputMode="numeric"
+                  value={year || ''}
+                  min={thisYear - 25}
+                  max={thisYear}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onChange={(e) => {
+                    const next = [...years]
+                    next[i] = Number(e.target.value.slice(0, 4)) || 0
+                    update(next)
+                  }}
+                  className="w-20 rounded-md border border-input bg-background px-2 py-1 text-xs tabular-nums"
+                />
+                <span className="text-xs text-muted-foreground">
+                  {/* The year they come off, which is the only thing this
+                      figure is used for — worth showing rather than leaving
+                      the reader to work out that 26 is the rule. Said as the
+                      year they leave rather than the last year they are on:
+                      "until 2036" reads as covered through 2036, and they are
+                      not, which the table beside it would contradict. */}
+                  {year > 0 ? `comes off in ${year + DEPENDENT_COVER_TO}` : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => update(years.filter((_, j) => j !== i))}
+                  className="ml-auto text-xs text-muted-foreground hover:text-destructive"
+                  aria-label="Remove"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground text-pretty">
+            A child can stay on the plan until they turn{' '}
+            {DEPENDENT_COVER_TO}, so each one comes off in their own year and
+            the income limit steps back down as they go.
+          </p>
+        </>
+      )}
     </div>
   )
 }

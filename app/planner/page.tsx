@@ -1,10 +1,11 @@
 import { cookies, headers } from 'next/headers'
 import { auth } from '@/lib/auth'
 import { getPlans } from '@/app/actions/plans'
+import { getHousehold, getPlanRegister } from '@/app/actions/balance-sheet'
 import { SiteHeader } from '@/components/site-header'
 import { SiteFooter } from '@/components/site-footer'
 import { DRAFT_COOKIE, parseDraftCookie } from '@/lib/planner-draft'
-import { RetirementPlanner } from '@/components/planner/retirement-planner'
+import { PlannerWorkspace } from '@/components/planner/planner-workspace'
 import { SavedPlans } from '@/components/planner/saved-plans'
 import { firstNameOf, greetingFor } from '@/lib/greeting'
 import { planToInputs } from '@/lib/plan'
@@ -28,11 +29,14 @@ export const metadata: Metadata = pageMetadata({
 export default async function PlannerPage({
   searchParams,
 }: {
-  searchParams: Promise<{ plan?: string; save?: string }>
+  searchParams: Promise<{ plan?: string; save?: string; tab?: string }>
 }) {
-  const { plan: planParam, save } = await searchParams
+  const { plan: planParam, save, tab } = await searchParams
   const session = await auth.api.getSession({ headers: await headers() })
   const isAuthed = !!session?.user
+  // Read on the server so the first paint already has them — no
+  // empty-then-filled flash on the figures people check.
+  const initialHousehold = isAuthed ? await getHousehold() : null
   const firstName = firstNameOf(session?.user ?? undefined)
   const greeting = isAuthed ? greetingFor(firstName, new Date().getHours()) : null
 
@@ -58,6 +62,11 @@ export default async function PlannerPage({
       planId = found.id
     }
   }
+
+  // What that plan assumes it owns and owes. It belongs to the plan, so an
+  // unsaved one starts empty rather than inheriting the last plan's property.
+  const initialRegister =
+    planId !== undefined ? await getPlanRegister(planId) : null
 
   // Only signed-in users keep a draft, and only when not editing a saved plan.
   const initialDraft =
@@ -96,8 +105,11 @@ export default async function PlannerPage({
             <SavedPlans plans={plans} />
           </div>
         )}
-        <RetirementPlanner
+        <PlannerWorkspace
           isAuthed={isAuthed}
+          initialHousehold={initialHousehold}
+          initialRegister={initialRegister}
+          initialTab={tab}
           initialInputs={initialInputs}
           initialName={initialName}
           initialPersonName={initialPersonName}

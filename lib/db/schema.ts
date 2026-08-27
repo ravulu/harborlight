@@ -129,6 +129,10 @@ export const retirementPlans = pgTable('retirement_plans', {
    * and which the projection can price for itself, so nobody has to guess it.
    */
   healthCoverBefore65: text('healthCoverBefore65').notNull().default('marketplace'),
+  // Birth years, so a reopened plan still describes the same children. A
+  // column rather than a table: it is a handful of small integers with no
+  // fields of their own and nothing to join to.
+  dependentBirthYears: integer('dependentBirthYears').array().notNull().default([]),
   healthPremiumMonthly: real('healthPremiumMonthly').notNull().default(0),
   /** Medicare-side costs from 65, kept out of the single spending figure. */
   healthAfter65Monthly: real('healthAfter65Monthly').notNull().default(0),
@@ -156,6 +160,131 @@ export const retirementPlans = pgTable('retirement_plans', {
 
 export type RetirementPlan = typeof retirementPlans.$inferSelect
 export type NewRetirementPlan = typeof retirementPlans.$inferInsert
+
+// --- The household ----------------------------------------------------------
+
+/**
+ * Who the household is, asked once.
+ *
+ * Name, age, filing status and state belong to the person: nobody is two ages,
+ * and a plan is a scenario rather than a second identity. What they own and
+ * owe does *not* live here — that varies by scenario, so it belongs to the
+ * plan.
+ *
+ * One row per user.
+ */
+export const household = pgTable('household', {
+  userId: text('userId').primaryKey(),
+  /**
+   * Who this is. It sat on every plan as `personName`, which existed only to
+   * let a plan be drawn up for somebody else — replaced by naming the plan
+   * after them. One household, one name.
+   */
+  name: text('name').notNull().default(''),
+  currentAge: integer('currentAge').notNull().default(0),
+  filingStatus: text('filingStatus').notNull().default('single'),
+  taxState: text('taxState').notNull().default(''),
+  updatedAt: timestamp('updatedAt', { withTimezone: true }).notNull().defaultNow(),
+})
+
+export type Household = typeof household.$inferSelect
+
+// --- The balance sheet ------------------------------------------------------
+
+/**
+ * What a plan assumes the household owns, beyond the pots it draws down.
+ *
+ * Illiquid by definition — property, a business stake, a fund position, a loan
+ * owed to them. The liquid balances stay on `retirement_plans` itself, and
+ * that split is what lets net worth be a plain sum with nothing to reconcile.
+ *
+ * Attached to a plan rather than to a user, because keeping the rental and
+ * selling it are two scenarios and a household wants to compare them. Saving a
+ * plan saves these with it; there is no separate act.
+ */
+export const holdings = pgTable(
+  'holdings',
+  {
+    id: text('id').primaryKey(),
+    userId: text('userId').notNull(),
+    /** The plan these belong to. Gone when it is. */
+    planId: integer('planId')
+      .notNull()
+      .references(() => retirementPlans.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    name: text('name').notNull().default(''),
+    value: real('value').notNull().default(0),
+    basis: real('basis').notNull().default(0),
+    growthPercent: real('growthPercent').notNull().default(0),
+    /** Null where it is being held rather than sold. */
+    saleAge: integer('saleAge'),
+    /** Interest-bearing kinds mature on a date rather than at an age. */
+    maturityYear: integer('maturityYear'),
+    counted: boolean('counted').notNull().default(false),
+
+    // Property
+    ownedYears: real('ownedYears').notNull().default(0),
+    landSharePercent: real('landSharePercent').notNull().default(20),
+    mortgage: real('mortgage').notNull().default(0),
+    mortgageRatePercent: real('mortgageRatePercent').notNull().default(0),
+    monthlyRent: real('monthlyRent').notNull().default(0),
+    propertyTax: real('propertyTax').notNull().default(0),
+    insurance: real('insurance').notNull().default(0),
+    maintenance: real('maintenance').notNull().default(0),
+    primaryResidence: boolean('primaryResidence').notNull().default(false),
+
+    // Interest-bearing
+    interestPercent: real('interestPercent').notNull().default(0),
+    interestPaidOut: boolean('interestPaidOut').notNull().default(true),
+
+    /** Qualified small business stock, §1202. */
+    qsbs: boolean('qsbs').notNull().default(false),
+
+    // A syndication's share, as its K-1 reports it.
+    annualDepreciationShare: real('annualDepreciationShare').notNull().default(0),
+    annualDistribution: real('annualDistribution').notNull().default(0),
+
+    // The sponsor's side of the same deal, kept apart because it is taxed
+    // apart: fees are ordinary income, a promote is carried under §1061.
+    sponsors: boolean('sponsors').notNull().default(false),
+    sponsorFees: real('sponsorFees').notNull().default(0),
+    promoteAtExit: real('promoteAtExit').notNull().default(0),
+
+    /** Their own order on the page, so a list does not reshuffle on save. */
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('holdings_plan_idx').on(t.planId, t.position)],
+)
+
+export type StoredHolding = typeof holdings.$inferSelect
+
+/**
+ * Debt with nothing behind it. A mortgage lives on the holding it secures.
+ *
+ * Attached to a plan for the same reason the holdings are: clearing the card
+ * before retiring and carrying it are two scenarios.
+ */
+export const liabilities = pgTable(
+  'liabilities',
+  {
+    id: text('id').primaryKey(),
+    userId: text('userId').notNull(),
+    planId: integer('planId')
+      .notNull()
+      .references(() => retirementPlans.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    name: text('name').notNull().default(''),
+    balance: real('balance').notNull().default(0),
+    ratePercent: real('ratePercent').notNull().default(0),
+    monthlyPayment: real('monthlyPayment').notNull().default(0),
+    position: integer('position').notNull().default(0),
+    createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('liabilities_plan_idx').on(t.planId, t.position)],
+)
+
+export type StoredLiability = typeof liabilities.$inferSelect
 
 // --- Feedback ---------------------------------------------------------------
 
