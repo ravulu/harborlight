@@ -1,5 +1,5 @@
 import { headers } from 'next/headers'
-import { notFound, redirect } from 'next/navigation'
+import { notFound } from 'next/navigation'
 import { auth } from '@/lib/auth'
 
 /**
@@ -27,26 +27,29 @@ export function isAdminEmail(email: string | null | undefined): boolean {
 /**
  * The gate. Returns the admin's own session user, or ends the request.
  *
- * Two different refusals, because "you are not signed in" and "you are not an
- * admin" are different situations:
+ * One refusal, not two. Signed out, signed in as someone else, on the list but
+ * with the wrong address — every one of them gets the same 404. To anyone who
+ * is not a signed-in admin, /admin was never built.
  *
- *   - No session at all: sign in first, and come back here. The app ends its
- *     session when the browser closes, so this is the ordinary state on every
- *     visit, and a 404 there is a dead end with no way forward — the admin
- *     cannot tell it from a page that does not exist. It reveals only that
- *     something at /admin wants a session, which is true of /dashboard too.
+ * An earlier version redirected the signed-out case to /sign-in?next=/admin,
+ * reasoning that a 404 leaves a real admin at a dead end with no way forward.
+ * That is true, and it is also the one thing on these pages that still
+ * answered a stranger's question: a redirect confirms that something lives at
+ * this path and wants a session, where a 404 says nothing at all.
  *
- *   - Signed in but not on the list: 404. Telling someone who has already
- *     identified themselves that there is a page here they may not have is
- *     information they can act on. To them /admin was never built.
+ * Giving it up costs the admin close to nothing here. Sessions end with the
+ * browser by design, so an admin is signed out on essentially every visit and
+ * goes through /sign-in either way; the redirect saved one step, once per
+ * session, for the handful of people on the list. Bookmarking
+ * /sign-in?next=/admin gets that step back without putting the path in front
+ * of anyone else.
  *
  * Called by every server action as well as the layout — a layout guards what
  * it renders, and an action is an endpoint anyone can post to regardless of
  * which page it was written for.
  */
-export async function requireAdmin(returnTo = '/admin') {
+export async function requireAdmin() {
   const session = await auth.api.getSession({ headers: await headers() })
-  if (!session?.user) redirect(`/sign-in?next=${encodeURIComponent(returnTo)}`)
-  if (!isAdminEmail(session.user.email)) notFound()
+  if (!session?.user || !isAdminEmail(session.user.email)) notFound()
   return session.user
 }

@@ -39,6 +39,7 @@ Set the **Production Branch** to whatever you deploy. It defaults to `main`.
 | `ADMIN_EMAILS` | Comma-separated addresses allowed into `/admin` |
 | `BETTER_AUTH_URL` | Optional — falls back to the Vercel production domain |
 | `NEXT_PUBLIC_SITE_URL` | Optional — same fallback |
+| `ANALYTICS_EXCLUDE_IPS` | Optional — comma-separated IPs kept out of the funnel, e.g. your own |
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"

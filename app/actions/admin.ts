@@ -34,7 +34,7 @@ export interface AdminPlanView {
  * directly, and the page that shows it cannot edit or save.
  */
 export async function getPlanForAdmin(id: number): Promise<AdminPlanView | null> {
-  await requireAdmin(`/admin/plan/${id}`)
+  await requireAdmin()
   const [row] = await db
     .select({ plan: retirementPlans, email: user.email, name: user.name })
     .from(retirementPlans)
@@ -265,7 +265,7 @@ const FUNNEL: { name: string; label: string }[] = [
  * somebody leaves — leaving is the absence of a next row.
  */
 export async function getUsage(from: string, to: string): Promise<UsageSummary> {
-  await requireAdmin('/admin')
+  await requireAdmin()
 
   /**
    * Either end may be left out, which means no bound on that side.
@@ -468,7 +468,7 @@ export async function getUsage(from: string, to: string): Promise<UsageSummary> 
  * quietly refresh.
  */
 export async function deleteVisit(session: string): Promise<number> {
-  await requireAdmin('/admin')
+  await requireAdmin()
   const id = session.trim()
   // An empty id would match every row with an empty session and is never a
   // visit anybody clicked on.

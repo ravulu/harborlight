@@ -3,7 +3,7 @@
 Decisions, open problems and traps that are not derivable from the code. Kept
 because each one cost time to discover and would cost it again.
 
-Last updated: 2026-08-25.
+Last updated: 2026-08-27.
 
 ---
 
@@ -620,3 +620,97 @@ ladder rather than the winner, show what would flip the answer, attribute the
 assumptions, and state what is not modelled. This is already house style — keep
 it. Nobody here is qualified to say where the line actually sits; get a real
 opinion before leaning on decision-engine positioning publicly.
+
+---
+
+## 9. The admin surface
+
+`/admin` holds support tools that read other people's finances:
+`lookupPlansByEmail` and `getPlanForAdmin` in `app/actions/admin.ts` return
+another account's plans by email address. Everything below follows from that
+one fact.
+
+### What guards it, and where
+
+- **An env allowlist, not a role column.** `ADMIN_EMAILS` in `lib/admin.ts`.
+  A role in the database is one bad UPDATE away from being granted to whoever
+  asks for it; this list changes only on the server, by someone with deploy
+  access. It fails closed — unset means nobody is an admin, including you.
+- **The gate runs in the layout *and* in all five server actions.** This is the
+  part that is easy to get wrong. A layout guards what it renders; a server
+  action is an endpoint anyone can post to, whatever page it was written for.
+  Any new action in `app/actions/admin.ts` needs its own `requireAdmin()` — do
+  not rely on it being reachable only from a guarded page.
+- `noindex, nofollow, nocache` and `force-dynamic` on the layout, and nothing
+  in the product chrome links here.
+
+### One refusal, not two — changed 2026-08-27
+
+`requireAdmin` used to redirect the signed-out case to `/sign-in?next=/admin`
+and 404 only the signed-in-but-not-allowlisted case. Now everything that is not
+a signed-in admin gets the same 404.
+
+The redirect was the last thing on these pages that answered a stranger's
+question: it confirmed that something lives at that path and wants a session,
+where a 404 says nothing at all. Giving it up costs an admin close to nothing
+*here specifically* — `rememberMe: false` in `components/auth-form.tsx` leaves
+the session cookie without an expiry of its own, so it ends with the browser and
+an admin signs in on essentially every visit regardless. The redirect saved one
+step, once per session, for the two or three people on the list. A bookmark to
+`/sign-in?next=/admin` gets that step back privately; the `next` param is
+already constrained to same-site paths in `auth-form.tsx`, so it cannot be bent
+into an open redirect.
+
+The `returnTo` argument died with the redirect and was removed from the three
+call sites that passed one.
+
+**Do not "improve" this by moving the route to a secret path.** That is
+obscurity standing in for a gate that already works, and secret URLs leak —
+`Referer` headers, browser history, server and CDN logs, error reports, anything
+pasted into a ticket. The 404 is the whole mechanism.
+
+### Open task: 2FA for admins
+
+The route being quiet is worth much less than this. A phished admin password
+gives up every user's financial data, and how guessable the URL was does not
+enter into it. Better Auth 1.7.1 ships `twoFactor` / `twoFactorClient` from
+`better-auth/plugins`; both are present, nothing needs installing.
+
+1. `twoFactor({ issuer: 'Fairwater' })` in the `plugins` array in `lib/auth.ts`.
+2. Schema: the plugin adds a `twoFactor` table and `user.twoFactorEnabled`. Add
+   it to `lib/db/schema.ts` with `onDelete: 'cascade'` on its `userId`, matching
+   the other four tables, then `db:push`.
+3. `twoFactorClient()` on the client.
+4. **The sign-in form is the actual work.** With 2FA on, `signIn.email` stops
+   returning a session and returns `twoFactorRedirect: true`; the session exists
+   only after `twoFactor.verifyTotp({ code })`. `components/auth-form.tsx`
+   assumes sign-in either fails or yields a session, so it needs a second state
+   and the `next` routing deferred until after verification. 60–100 lines. Pass
+   `trustDevice: false` — "remember this device" contradicts the `rememberMe:
+   false` stance the app already takes everywhere else.
+5. `requireAdmin` grows a third outcome: allowlisted and enrolled → through;
+   allowlisted but not enrolled → redirect to an enrolment page; everything else
+   → 404. That reintroduces a redirect, but only for someone who has already
+   proven they are an admin, so it leaks nothing.
+
+Two traps, both of which lock you out of your own support tools:
+
+- **Ship the enrolment page in the same deploy as the requirement, or before
+  it.** If `requireAdmin` starts demanding `twoFactorEnabled` while nobody has
+  enrolled, every admin is locked out and the only way back in is another
+  deploy.
+- **Show the backup codes once, at enrolment, and mean it.** A lost phone with
+  no backup codes is a permanent lockout; recovery would be an env change plus a
+  redeploy.
+
+Note that `twoFactorEnabled` is account-wide, not admin-scoped — once enrolled,
+ordinary sign-ins want the code too. That is correct: the account can read every
+user's finances either way.
+
+### Before launch
+
+Confirm `ADMIN_EMAILS` is actually set in the Vercel production environment. It
+fails safe if missing, but "safe" here means locked out of the support tools
+with no way in short of a deploy. It belongs with the other origin-sensitive
+variables that have to be right before the first real deploy: `BETTER_AUTH_URL`,
+`NEXT_PUBLIC_SITE_URL` and `ANALYTICS_EXCLUDE_IPS` (see `docs/deploy-vercel.md`).

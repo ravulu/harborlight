@@ -39,11 +39,6 @@ export const metadata: Metadata = {
    * The SVG carries baked colours rather than `currentColor`: an icon file has
    * nothing to inherit from, so `currentColor` would resolve to black.
    */
-  icons: {
-    icon: [{ url: '/favicon.svg', type: 'image/svg+xml' }],
-    shortcut: ['/favicon.ico'],
-    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
-  },
   robots: {
     index: true,
     follow: true,
