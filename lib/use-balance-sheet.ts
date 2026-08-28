@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-import { saveHousehold } from '@/app/actions/balance-sheet'
 import { forgetBrowserCopies, takeStashedPending } from '@/lib/holdings-store'
+import { isLocal } from '@/lib/persistence'
+import { requireStore } from '@/lib/store'
 import {
   EMPTY_HOUSEHOLD,
   EMPTY_REGISTER,
@@ -126,17 +127,26 @@ export function useBalanceSheet(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Who you are saves itself. What a plan assumes does not: that is the plan's
-  // to keep, and it is kept when the plan is.
+  /**
+   * Who you are saves itself. What a plan assumes does not: that is the plan's
+   * to keep, and it is kept when the plan is.
+   *
+   * "Signed in" is the cloud-mode spelling of "there is somewhere to put it".
+   * In local mode there is always somewhere — the browser — and nobody to sign
+   * in as, so the same rule reads differently: write it unless there is
+   * nowhere to write. Getting this wrong is silent, and was: the household
+   * simply never saved, and an age typed into the tile came back as the
+   * default on the next visit while every other figure returned intact.
+   */
   useEffect(() => {
-    if (!isAuthed) return
+    if (!isAuthed && !isLocal) return
     // Nothing worth writing, and everything to lose by writing it. The server
     // refuses a blank over a filled row as well; this saves the round trip and
     // stops the page announcing "Saving…" for a write that will not happen.
     if (isBlankHousehold(household)) return
     const id = setTimeout(() => {
       setSaving(true)
-      void Promise.resolve(saveHousehold(household))
+      void Promise.resolve(requireStore().saveHousehold(household))
         .catch(() => {
           // A failed write should not take the page with it. The figures are
           // still on screen, and the next edit tries again.

@@ -1,7 +1,9 @@
 import os from 'node:os'
 import { betterAuth } from 'better-auth'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
+import { isAdminEmail } from '@/lib/admin'
 import { PASSWORD_MIN, passwordProblem } from '@/lib/password'
+import { isLocal } from '@/lib/persistence'
 
 import { pool } from '@/lib/db'
 
@@ -17,6 +19,26 @@ const PASSWORD_PATHS = new Set([
   '/change-password',
   '/reset-password',
 ])
+
+/**
+ * The endpoints that decide who gets a session, and who gets an account.
+ *
+ * Gated in local mode to the `ADMIN_EMAILS` allowlist and nobody else. In
+ * local mode an account holds nothing — plans live in the reader's browser —
+ * so the only reason to have one is `/admin`, and the only people who should
+ * is the handful of addresses on the list.
+ *
+ * Enforced here rather than on the pages, and the distinction is the whole
+ * point. §9 of the engineering notes makes it about server actions and it is
+ * just as true of these: a page guards what it renders, and
+ * `/api/auth/sign-in/email` is an endpoint anything can post to whatever the
+ * page in front of it says. A check in `AuthForm` would be decoration.
+ *
+ * Sign-up is on the list too. Without it, an address that is not allowlisted
+ * cannot sign in but can still create the row — an account that exists,
+ * cannot be used, and sits in the database being counted.
+ */
+const ALLOWLISTED_PATHS = new Set(['/sign-in/email', '/sign-up/email'])
 
 const isDev = process.env.NODE_ENV === 'development'
 const port = process.env.PORT ?? 3000
@@ -111,6 +133,24 @@ export const auth = betterAuth({
      * anybody can step around by changing it once.
      */
     before: createAuthMiddleware(async (ctx) => {
+      /**
+       * Local mode: the allowlist decides, before anything else is looked at.
+       *
+       * One refusal for every reason, and deliberately so. "Not on the list"
+       * and "wrong password" and "no such account" all answer the same way,
+       * because three different messages would turn this endpoint into a way
+       * of asking who the administrators are — which is the question §9
+       * refuses to answer anywhere else.
+       */
+      if (isLocal && ALLOWLISTED_PATHS.has(ctx.path)) {
+        const email = (ctx.body as { email?: unknown } | undefined)?.email
+        if (typeof email !== 'string' || !isAdminEmail(email)) {
+          throw new APIError('UNAUTHORIZED', {
+            message: 'That email address cannot sign in here.',
+          })
+        }
+      }
+
       if (!PASSWORD_PATHS.has(ctx.path)) return
       const body = ctx.body as { password?: unknown; newPassword?: unknown }
       const password = body?.newPassword ?? body?.password

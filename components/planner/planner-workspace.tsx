@@ -39,6 +39,7 @@ export function PlannerWorkspace({
   initialHousehold,
   initialRegister,
   initialTab,
+  onStored,
 }: {
   isAuthed: boolean
   /** Read on the server for a signed-in visitor, so the first paint is right. */
@@ -53,6 +54,14 @@ export function PlannerWorkspace({
   planId?: number
   initialDraft?: StoredDraft | null
   saveOnArrival?: boolean
+  /**
+   * Told after a plan has been stored, so the list above can re-read.
+   *
+   * Cloud mode has `router.refresh()` and a server component that will fetch
+   * again; local mode has neither, and without this a plan saved here would
+   * not appear in the list beside it until the page was reloaded.
+   */
+  onStored?: () => void
 }) {
   const { household, register, setHousehold, setRegister, saving, adopted } =
     useBalanceSheet(isAuthed, initialHousehold, initialRegister, planId)
@@ -192,6 +201,7 @@ export function PlannerWorkspace({
             active={tab === 'plan'}
             autoSaveReady={adopted}
             activeTab={tab}
+            onStored={onStored}
           />
         </TabsContent>
 

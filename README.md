@@ -33,6 +33,7 @@ cp .env.example .env.local
 | `BETTER_AUTH_SECRET` | Signs session cookies |
 | `BETTER_AUTH_URL` | The app's own origin |
 | `NEXT_PUBLIC_SITE_URL` | Public origin for canonical links, the sitemap and share cards. Must be the real domain in production: a wrong value points every canonical at a host that does not serve the page |
+| `NEXT_PUBLIC_PERSISTENCE` | `local` or `cloud`. Unset means **local**, where plans live in the reader's own browser and the app has no accounts. Only the exact string `cloud` uses the database. Read at build time, so changing it needs a redeploy rather than a restart — see [persistence modes](docs/persistence-modes.md) |
 | `ADMIN_EMAILS` | Who may open `/admin`, comma-separated. Unset means nobody, so a deployment that forgets it locks admins out rather than letting anyone in |
 
 Generate a secret with:
@@ -121,6 +122,7 @@ Open <http://localhost:3000>.
 | `npm run db:generate` | Generate a SQL migration from schema changes |
 | `npm run db:migrate` | Apply generated migrations |
 | `npm run db:studio` | Browse the database in Drizzle Studio |
+| `npm run watch:figures` | Check whether the government has published a table this build does not have — see [cron-jobs](cron-jobs/README.md) |
 
 `db:push` is convenient in development. Prefer `db:generate` plus `db:migrate`
 once you have data worth preserving.
@@ -149,6 +151,14 @@ lib/
 - [Deploying on Render](docs/deploy-render.md) — the environment variables,
   the two that are read at build time rather than run time, and what breaks
   when they are wrong.
+- [Keeping the published figures current](docs/tax-data-updates.md) — a design,
+  not yet built: how the tax, IRMAA, ACA and state tables would follow the
+  government's own publication cycle, and why the numbers are proposed for
+  review rather than applied automatically.
+- [Persistence modes: cloud or local](docs/persistence-modes.md) — a design,
+  not yet built: one deployment-time switch deciding whether figures live in
+  Postgres or in the reader's own browser, and what changes on the page when
+  they do.
 - [How Fairwater compares to Boldin](docs/competitive-boldin.md) — what the
   app does better, what it does not do at all, and the one gap that makes
   existing advice incomplete rather than merely absent.

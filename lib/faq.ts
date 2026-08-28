@@ -9,6 +9,8 @@
  * Kept beside the FAQ page rather than in lib/seo.ts: these are the words a
  * reader sees, and the fact that a crawler also reads them is a consequence.
  */
+import { isLocal } from '@/lib/persistence'
+
 export interface Qa {
   q: string
   a: string
@@ -41,7 +43,9 @@ export const FAQ: Qa[] = [
   },
   {
     q: 'Is Fairwater a free retirement calculator?',
-    a: 'Yes. The planner is free and works without an account. An account exists only so you can save plans, compare them side by side, and come back to them later. There is nothing to install and no card.',
+    a: isLocal
+      ? 'Yes. There is nothing to install, no card, and no account — there is no sign-up at all, because there is nothing to sign up for. Plans you save are kept in your own browser, and comparing them works the same way without one.'
+      : 'Yes. The planner is free and works without an account. An account exists only so you can save plans, compare them side by side, and come back to them later. There is nothing to install and no card.',
   },
   {
     q: 'What is a Monte Carlo retirement simulation, and why use one?',
@@ -97,12 +101,22 @@ export const FAQ: Qa[] = [
   },
   {
     q: 'Can I compare different retirement plans?',
-    a: 'Yes. Save as many as you like — retiring at 62 against 67, spending $5,000 a month against $7,000, claiming Social Security early against late — then tick two or more on My plans and they line up in columns: confidence, the pot at retirement, how long the money lasts, and the lifetime tax bill. Rows where one plan clearly wins are marked; rows where "better" is a matter of judgement are left as information.',
+    a: 'Yes. Save as many as you like — retiring at 62 against 67, spending $5,000 a month against $7,000, claiming Social Security early against late — then tick two or more in the saved-plans list and they line up in columns: confidence, the pot at retirement, how long the money lasts, and the lifetime tax bill. Rows where one plan clearly wins are marked; rows where "better" is a matter of judgement are left as information.',
   },
   {
     q: 'Is my financial information private?',
-    a: 'Your plans are stored against your account and served only to you. The planner itself runs entirely in your browser — the projection and the simulations are computed on your own device, not sent anywhere — so you can model a whole retirement without saving anything or creating an account at all. What is recorded is anonymous and deliberately thin: that a page was opened, that a projection was run, roughly which country from — never a figure you typed, and tied to a random id that lasts one browser session and cannot follow you across days or sites. That is why there is no cookie banner: there is no cookie.',
+    a: isLocal
+      ? 'Nothing you enter ever reaches us. The projection and the ten thousand simulations are computed in your browser, and the plans you save are kept in that same browser — not in an account, not in a database, and nowhere anybody here can read them. There is no sign-up, so there is no account to attach your figures to, and if you asked us what your plan said we could not tell you. What is recorded is anonymous and deliberately thin: that a page was opened, that a projection was run, roughly which country from — never a figure you typed, and tied to a random id that lasts one browser session and cannot follow you across days or sites. That is why there is no cookie banner: there is no cookie.'
+      : 'Your plans are stored against your account and served only to you. The planner itself runs entirely in your browser — the projection and the simulations are computed on your own device, not sent anywhere — so you can model a whole retirement without saving anything or creating an account at all. What is recorded is anonymous and deliberately thin: that a page was opened, that a projection was run, roughly which country from — never a figure you typed, and tied to a random id that lasts one browser session and cannot follow you across days or sites. That is why there is no cookie banner: there is no cookie.',
   },
+  ...(isLocal
+    ? [
+        {
+          q: 'Where are my saved plans kept, and what happens if I clear my browser?',
+          a: 'In this browser, on this computer, and nowhere else. Saving does not make a file and does not send anything to us — it writes the plan into the browser\u2019s own storage, which means three things worth knowing before you rely on it. Clearing your browsing data removes your plans along with everything else. They will not follow you to another computer, or even to a different browser on the same one. And anyone else who uses this browser can open them, so a shared or family machine is worth thinking about. Two controls sit above your saved plans for exactly this: \u201cDownload a copy\u201d writes a file you can keep somewhere safe, move to a new computer, or send on, and \u201cImport a file\u201d reads one back \u2014 it adds to what is here rather than replacing it. \u201cForget\u201d removes everything from this browser in one step, and there is no way back from that unless you downloaded a copy first.',
+        },
+      ]
+    : []),
   {
     q: 'Is this financial advice?',
     a: 'No. Fairwater is a modelling tool for thinking about your own numbers, and every projection is only as good as the assumptions you give it. It cannot know your health, your job security, your family, or what markets will do. Use it to understand the shape of the decisions in front of you, and talk to a qualified adviser before acting on any of them.',

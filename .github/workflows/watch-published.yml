@@ -1,0 +1,86 @@
+# Notices when the government publishes a figure this build does not have.
+#
+# It reads nothing into the app and opens no pull request: the job reports, a
+# person checks the primary source, and the table is entered by hand. See
+# cron-jobs/README.md for why that line is where it is.
+name: Watch published figures
+
+on:
+  schedule:
+    # Weekly, Monday morning UTC. None of these sources moves faster than that,
+    # and a job that cries wolf every morning is a job people filter.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      - name: Check the sources
+        id: watch
+        # Exits 1 when something wants a look, which is a finding rather than a
+        # broken job — so the step is allowed to fail and the result is read.
+        continue-on-error: true
+        run: |
+          {
+            echo 'report<<REPORT_EOF'
+            npm run --silent watch:figures || true
+            echo 'REPORT_EOF'
+          } >> "$GITHUB_OUTPUT"
+          npm run --silent watch:figures > /dev/null
+
+      - name: Read what can be read
+        id: propose
+        # Layer 2: offers figures from the one source served as text. Exits 1
+        # when it has a candidate, which is a finding rather than a failure.
+        continue-on-error: true
+        run: |
+          {
+            echo 'report<<REPORT_EOF'
+            npm run --silent propose:figures || true
+            echo 'REPORT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open an issue if anything wants a look
+        if: steps.watch.outcome == 'failure' || steps.propose.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const report = `${{ steps.watch.outputs.report }}\n\n${{ steps.propose.outputs.report }}`
+            const title = 'Published figures may need updating'
+            // One open issue at a time. A weekly job that opens a fifty-second
+            // copy of the same issue is a job somebody turns off.
+            const { data: open } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'published-figures',
+            })
+            const body = `${report}\n\n_Opened by \`.github/workflows/watch-published.yml\`. Nothing here has read a figure — check the primary source._`
+            if (open.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: open[0].number,
+                body,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['published-figures'],
+              })
+            }

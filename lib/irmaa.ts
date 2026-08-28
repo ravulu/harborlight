@@ -34,6 +34,12 @@ import type { FilingStatus } from '@/lib/state-tax'
  */
 export const IRMAA_YEAR = 2026
 
+/** Where the figures came from — see `lib/published.ts`. */
+export const IRMAA_SOURCE = {
+  title: 'CMS 2026 Medicare Parts A & B premiums and deductibles',
+  url: 'https://www.cms.gov/newsroom/fact-sheets/2026-medicare-parts-b-premiums-and-deductibles',
+} as const
+
 /**
  * How far back the income test looks.
  *

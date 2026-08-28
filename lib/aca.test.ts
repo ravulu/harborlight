@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  benchmarkAnnualFor,
-  policyAges,
   ACA_YEAR,
   AGE_FACTOR,
   APPLICABLE_PERCENTAGE,
@@ -12,9 +10,12 @@ import {
   MEDICARE_AGE,
   acaCost,
   acaMagiOf,
+  acaTableFor,
   ageFactor,
   applicablePercentage,
   benchmarkAnnual,
+  benchmarkAnnualFor,
+  policyAges,
   povertyLine,
 } from '@/lib/aca'
 
@@ -335,5 +336,73 @@ describe('the ACA year', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(`${ACA_YEAR + 1}-06-15T12:00:00`))
     expect(new Date().getFullYear()).toBeGreaterThan(ACA_YEAR)
+  })
+})
+
+/**
+ * Rolling forward past the published year.
+ *
+ * Added 2026-08-28, when ACA stopped being the one annual table that refused
+ * to project. The refusal was defensible — a benchmark premium is a market
+ * price, not an indexation — and it was still the wrong trade: a plan retiring
+ * at 58 is priced across seven years before Medicare, and holding a real
+ * premium flat for all of them understates the largest line in those years.
+ */
+describe('the ACA figures past their year', () => {
+  it('is the published table for its own year and before', () => {
+    expect(acaTableFor(ACA_YEAR).estimated).toBeFalsy()
+    expect(acaTableFor(ACA_YEAR - 5).year).toBe(ACA_YEAR)
+    expect(acaTableFor(ACA_YEAR).benchmark40Monthly).toBe(BENCHMARK_40_MONTHLY)
+  })
+
+  it('marks anything it projected, so nothing is passed off as published', () => {
+    expect(acaTableFor(ACA_YEAR + 1).estimated).toBe(true)
+    expect(acaTableFor(ACA_YEAR + 1).year).toBe(ACA_YEAR + 1)
+  })
+
+  /**
+   * The correction that matters, and the one this nearly got wrong.
+   *
+   * `acaCostFor` is handed a MAGI already deflated to today's dollars. A
+   * poverty line indexed *nominally* and tested against a real income would
+   * make the cliff recede every year for no reason but the calendar — the
+   * mistake `lib/irmaa.ts` records making with its own thresholds. In today's
+   * money the guidelines track inflation, so they are flat, and that is a
+   * result rather than a failure to model them.
+   */
+  it('holds the poverty line flat, because it is stated in today’s money', () => {
+    for (const ahead of [1, 5, 20, 40]) {
+      expect(acaTableFor(ACA_YEAR + ahead).fplBase).toBe(FPL_BASE)
+      expect(povertyLine(2, ACA_YEAR + ahead)).toBe(povertyLine(2, ACA_YEAR))
+    }
+  })
+
+  it('raises the benchmark premium in real terms, and stops raising it', () => {
+    const at = (ahead: number) => acaTableFor(ACA_YEAR + ahead).benchmark40Monthly
+    // It rises...
+    expect(at(1)).toBeGreaterThan(BENCHMARK_40_MONTHLY)
+    expect(at(10)).toBeGreaterThan(at(1))
+    // ...and then settles, because the excess over indexation fades rather
+    // than compounding for fifty years.
+    const plateau = at(40)
+    expect(at(60)).toBe(plateau)
+    // A premium seven times its real cost is the failure this shape prevents.
+    expect(plateau / BENCHMARK_40_MONTHLY).toBeLessThan(1.6)
+    expect(plateau / BENCHMARK_40_MONTHLY).toBeGreaterThan(1.2)
+  })
+
+  it('never lowers it', () => {
+    let previous = 0
+    for (let ahead = 0; ahead <= 50; ahead++) {
+      const now = acaTableFor(ACA_YEAR + ahead).benchmark40Monthly
+      expect(now).toBeGreaterThanOrEqual(previous)
+      previous = now
+    }
+  })
+
+  it('leaves the applicable percentages alone', () => {
+    // Set by Revenue Procedure, not indexed. Projecting them would be making
+    // up law rather than extrapolating a price.
+    expect(acaTableFor(ACA_YEAR + 20).percentages).toBe(APPLICABLE_PERCENTAGE)
   })
 })

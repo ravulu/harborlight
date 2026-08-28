@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import type { RetirementPlan } from '@/lib/db/schema'
+import type { PlanSummary } from '@/lib/store'
 import { simulate, formatCurrency, type PlanInputs } from '@/lib/retirement'
 import { runMonteCarlo } from '@/lib/monte-carlo'
 export type { PlanInputs }
@@ -32,7 +32,13 @@ interface Measure {
 }
 
 export interface Computed {
-  plan: RetirementPlan
+  /**
+   * The stored plan, which is a summary rather than a database row — the
+   * compare table has no business knowing whether these came from Postgres or
+   * from the reader's own browser. Every figure below reads `inputs`; only the
+   * name and the id come off the plan itself.
+   */
+  plan: PlanSummary
   inputs: PlanInputs
   result: ReturnType<typeof simulate>
   mc: ReturnType<typeof runMonteCarlo>
@@ -42,7 +48,7 @@ const MEASURES: Measure[] = [
   {
     label: 'Retires at',
     value: () => null,
-    render: (c) => String(c.plan.retirementAge),
+    render: (c) => String(c.inputs.retirementAge),
     note: 'Not a score: retiring earlier costs confidence, which the row below shows.',
   },
   {
@@ -62,17 +68,17 @@ const MEASURES: Measure[] = [
   {
     label: 'Monthly spending',
     value: () => null,
-    render: (c) => formatCurrency(c.plan.monthlyRetirementSpending),
+    render: (c) => formatCurrency(c.inputs.monthlyRetirementSpending),
   },
   {
     label: 'Money lasts',
     // A plan that lasts is scored past the end, so it beats every plan that
     // runs out no matter how late.
     value: (c) =>
-      c.result.lastsThroughRetirement ? c.plan.endAge + 1 : (c.result.depletionAge ?? 0),
+      c.result.lastsThroughRetirement ? c.inputs.endAge + 1 : (c.result.depletionAge ?? 0),
     render: (c) =>
       c.result.lastsThroughRetirement
-        ? `through ${c.plan.endAge}`
+        ? `through ${c.inputs.endAge}`
         : `runs out at ${c.result.depletionAge}`,
     better: 'high',
   },
@@ -80,14 +86,14 @@ const MEASURES: Measure[] = [
     label: 'Social Security',
     value: () => null,
     render: (c) =>
-      c.plan.socialSecurityMonthly > 0
-        ? `${formatCurrency(c.plan.socialSecurityMonthly)}/mo from ${c.plan.socialSecurityAge}`
+      c.inputs.socialSecurityMonthly > 0
+        ? `${formatCurrency(c.inputs.socialSecurityMonthly)}/mo from ${c.inputs.socialSecurityAge}`
         : 'none',
   },
   {
     label: 'Saving now',
     value: () => null,
-    render: (c) => `${formatCurrency(c.plan.monthlyContribution)}/mo`,
+    render: (c) => `${formatCurrency(c.inputs.monthlyContribution)}/mo`,
   },
   {
     label: 'Lifetime tax',

@@ -1,5 +1,7 @@
 'use server'
 
+import { notFound } from 'next/navigation'
+import { isLocal } from '@/lib/persistence'
 import { db } from '@/lib/db'
 import { retirementPlans, user, feedback, events } from '@/lib/db/schema'
 import { and, countDistinct, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm'
@@ -35,6 +37,7 @@ export interface AdminPlanView {
  */
 export async function getPlanForAdmin(id: number): Promise<AdminPlanView | null> {
   await requireAdmin()
+  if (isLocal) notFound()
   const [row] = await db
     .select({ plan: retirementPlans, email: user.email, name: user.name })
     .from(retirementPlans)
@@ -64,6 +67,7 @@ export async function lookupPlansByEmail(email: string): Promise<{
   plans: PlanHit[]
 }> {
   await requireAdmin()
+  if (isLocal) notFound()
   const term = email.trim()
   if (!term) return { found: false, plans: [] }
 

@@ -1,8 +1,10 @@
-import { redirect } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
+import { isLocal } from '@/lib/persistence'
 import Link from 'next/link'
 import { headers } from 'next/headers'
 import { auth } from '@/lib/auth'
-import { getPlans } from '@/app/actions/plans'
+import { deletePlan } from '@/app/actions/plans'
+import { cloudStore } from '@/lib/store/cloud'
 import { SiteHeader } from '@/components/site-header'
 import { SiteFooter } from '@/components/site-footer'
 import { SavedPlans } from '@/components/planner/saved-plans'
@@ -22,10 +24,18 @@ export const metadata: Metadata = pageMetadata({
 })
 
 export default async function DashboardPage() {
+  // Nothing to list in local mode: this page reads plans off an account and
+  // local mode keeps them in the browser, where the planner already shows
+  // them. An admin signed in here has no plans of their own to see.
+  if (isLocal) notFound()
+
   const session = await auth.api.getSession({ headers: await headers() })
   if (!session?.user) redirect('/sign-in')
 
-  const plans = await getPlans()
+  // Through the store, so this page and the planner agree about what a
+  // stored plan is. Cloud-only by construction: it has already redirected
+  // anyone without a session, and local mode has no sessions to have.
+  const plans = await cloudStore.list()
 
   return (
     <div className="min-h-svh bg-background">
@@ -54,7 +64,9 @@ export default async function DashboardPage() {
           </Link>
         </div>
 
-        <SavedPlans plans={plans} />
+        {/* A server action passed as a prop, which is how the list stays
+            ignorant of where its plans live. */}
+        <SavedPlans plans={plans} onDelete={deletePlan} />
       </main>
       <SiteFooter />
     </div>

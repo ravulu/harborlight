@@ -14,6 +14,19 @@ import type { PlanInputs } from '@/lib/retirement'
  */
 export const BRACKET_YEAR = 2026
 
+/**
+ * Where the figures came from.
+ *
+ * A field rather than a comment, so `lib/published.ts` can read it, `/admin`
+ * can show it and the watcher can say which document it is looking for a
+ * successor to. This file cited nothing at all before, which for a table of
+ * hand-entered tax brackets is the citation that matters most.
+ */
+export const BRACKET_SOURCE = {
+  title: 'Rev. Proc. 2025-32 — annual inflation adjustments for 2026',
+  url: 'https://www.irs.gov/pub/irs-drop/rp-25-32.pdf',
+} as const
+
 export interface FederalSchedule {
   brackets: Bracket[]
   standardDeduction: number

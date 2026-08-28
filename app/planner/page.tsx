@@ -1,15 +1,14 @@
+import { isAdminEmail } from '@/lib/admin'
 import { cookies, headers } from 'next/headers'
 import { auth } from '@/lib/auth'
-import { getPlans } from '@/app/actions/plans'
-import { getHousehold, getPlanRegister } from '@/app/actions/balance-sheet'
 import { SiteHeader } from '@/components/site-header'
 import { SiteFooter } from '@/components/site-footer'
 import { DRAFT_COOKIE, parseDraftCookie } from '@/lib/planner-draft'
-import { PlannerWorkspace } from '@/components/planner/planner-workspace'
-import { SavedPlans } from '@/components/planner/saved-plans'
+import { PlannerBody } from '@/components/planner/planner-body'
 import { firstNameOf, greetingFor } from '@/lib/greeting'
-import { planToInputs } from '@/lib/plan'
-import type { PlanInputs } from '@/lib/retirement'
+import { isLocal } from '@/lib/persistence'
+import { cloudStore } from '@/lib/store/cloud'
+import type { PlanSummary, StoredPlan } from '@/lib/store'
 import { pageMetadata } from '@/lib/seo'
 import type { Metadata } from 'next'
 
@@ -34,49 +33,41 @@ export default async function PlannerPage({
   const { plan: planParam, save, tab } = await searchParams
   const session = await auth.api.getSession({ headers: await headers() })
   const isAuthed = !!session?.user
-  // Read on the server so the first paint already has them — no
-  // empty-then-filled flash on the figures people check.
-  const initialHousehold = isAuthed ? await getHousehold() : null
   const firstName = firstNameOf(session?.user ?? undefined)
   const greeting = isAuthed ? greetingFor(firstName, new Date().getHours()) : null
 
-  // Everything they have saved, so the planner is a place to come back to
-  // rather than only a place to start from.
-  const plans = isAuthed ? await getPlans() : []
+  /**
+   * Read on the server, in cloud mode only.
+   *
+   * The point of reading here is that the first paint already has the figures
+   * — no empty-then-filled flash on the numbers people check. Local mode
+   * cannot have that: the plans are in the reader's browser and the server has
+   * never seen them, so `PlannerBody` fetches them itself and holds a
+   * restoring state while it does. Nothing is read here for a local
+   * deployment, and the store actions would refuse it anyway: every one of
+   * them is scoped by a session there is no longer any way to hold.
+   */
+  const initialPlans: PlanSummary[] =
+    !isLocal && isAuthed ? await cloudStore.list() : []
 
-  let initialInputs: PlanInputs | undefined
-  let initialName: string | undefined
-  // Defaults to the account holder: most plans are your own, and a saved
-  // plan's stored value replaces it below.
-  let initialPersonName: string | undefined = session?.user?.name ?? undefined
-  let planId: number | undefined
+  const openedId = planParam ? Number(planParam) : NaN
+  const initialOpened: StoredPlan | null =
+    !isLocal && isAuthed && Number.isInteger(openedId)
+      ? await cloudStore.get(openedId)
+      : null
 
-  if (isAuthed && planParam) {
-    const found = plans.find((p) => String(p.id) === planParam)
-    if (found) {
-      initialInputs = planToInputs(found)
-      initialName = found.name
-      // Plans saved before this field existed have none; fall back rather
-      // than blanking a field the user never had the chance to fill.
-      initialPersonName = found.personName || initialPersonName
-      planId = found.id
-    }
-  }
-
-  // What that plan assumes it owns and owes. It belongs to the plan, so an
-  // unsaved one starts empty rather than inheriting the last plan's property.
-  const initialRegister =
-    planId !== undefined ? await getPlanRegister(planId) : null
+  const initialHousehold =
+    !isLocal && isAuthed ? await cloudStore.getHousehold() : null
 
   // Only signed-in users keep a draft, and only when not editing a saved plan.
   const initialDraft =
-    isAuthed && planId === undefined
+    isAuthed && initialOpened === null
       ? parseDraftCookie((await cookies()).get(DRAFT_COOKIE)?.value)
       : null
 
   return (
     <div className="min-h-svh bg-background">
-      <SiteHeader isAuthed={isAuthed} />
+      <SiteHeader isAuthed={isAuthed} isAdmin={isAdminEmail(session?.user?.email)} />
       <main className="mx-auto max-w-6xl px-4 py-8">
         <div className="mb-6 flex flex-col gap-1">
           {/* Above the title rather than instead of it: the page still has to
@@ -92,29 +83,16 @@ export default async function PlannerPage({
           </p>
         </div>
 
-        {plans.length > 0 && (
-          <div className="mb-8 flex flex-col gap-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="font-serif text-lg font-medium text-foreground">
-                Your saved plans
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                {plans.length} saved. Opening one loads it below.
-              </p>
-            </div>
-            <SavedPlans plans={plans} />
-          </div>
-        )}
-        <PlannerWorkspace
+        <PlannerBody
           isAuthed={isAuthed}
+          initialPlans={initialPlans}
           initialHousehold={initialHousehold}
-          initialRegister={initialRegister}
-          initialTab={tab}
-          initialInputs={initialInputs}
-          initialName={initialName}
-          initialPersonName={initialPersonName}
-          planId={planId}
+          initialOpened={initialOpened}
+          planParam={planParam}
+          // Most plans are your own, and a saved plan's own value wins.
+          defaultPersonName={session?.user?.name ?? undefined}
           initialDraft={initialDraft}
+          initialTab={tab}
           saveOnArrival={save === '1'}
         />
       </main>

@@ -15,6 +15,10 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   test: {
     environment: 'node',
-    include: ['lib/**/*.test.ts'],
+    // `cron-jobs/` too: the extractors are held to the same standard as the
+    // engines, and the check that matters most — that a parser reproduces the
+    // table somebody already verified by hand — is a unit test against a saved
+    // document rather than anything that touches the network.
+    include: ['lib/**/*.test.ts', 'cron-jobs/**/*.test.ts'],
   },
 })

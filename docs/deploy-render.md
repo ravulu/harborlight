@@ -49,6 +49,7 @@ passing for Render to route to it.
 | `BETTER_AUTH_SECRET` | 32 random bytes, base64 | run time |
 | `BETTER_AUTH_URL` | The exact public origin, no trailing slash | run time |
 | `NEXT_PUBLIC_SITE_URL` | The same origin | **build time** |
+| `NEXT_PUBLIC_PERSISTENCE` | `local` or `cloud`; unset means `local` | **build time** |
 | `ADMIN_EMAILS` | Comma-separated addresses allowed into `/admin`. Unset means nobody | run time |
 | `NODE_VERSION` | `22.20.0` | build time |
 | `DATABASE_POOL_MAX` | `5` — per instance | run time |

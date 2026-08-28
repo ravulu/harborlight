@@ -1,3 +1,9 @@
+// Premiums here and premiums there move for the same reason and are assumed
+// to move the same way — see `acaTableFor`. Importing the curve rather than
+// restating it means the two cannot drift apart, which they would, quietly,
+// the first time one of them was tuned.
+import { ASSUMED_INDEXATION, premiumMultiple } from '@/lib/irmaa'
+
 
 /**
  * ACA marketplace cover, and the subsidy that pays for most of it.
@@ -20,6 +26,12 @@
 
 /** The year these figures are law for. */
 export const ACA_YEAR = 2026
+
+/** Where the figures came from — see `lib/published.ts`. */
+export const ACA_SOURCE = {
+  title: 'IRS Rev. Proc. 2025-25 (applicable percentages), HHS poverty guidelines',
+  url: 'https://www.irs.gov/pub/irs-drop/rp-25-25.pdf',
+} as const
 
 /**
  * Federal poverty guidelines, in the dollars of the year before the coverage
@@ -180,9 +192,89 @@ export function ageFactor(age: number): number {
 }
 
 /** The poverty line for a household of this size, in the coverage year. */
-export function povertyLine(householdSize: number): number {
+/**
+ * The figures for a year, rolled forward past the last published set.
+ *
+ * Decided 2026-08-28. Until then ACA alone among the annual tables refused to
+ * project: it carried a year and a guard and then went on charging that year's
+ * poverty line and benchmark premium for ever. The argument for refusing was
+ * that a benchmark premium is a market price rather than an indexation, and
+ * that is true — but the consequence was worse than the imprecision. A plan
+ * retiring at 58 is priced across seven years before Medicare, and holding the
+ * poverty line flat while every income in the projection inflates walks
+ * households over the subsidy cliff for no reason but the calendar.
+ *
+ * So each part moves at the rate that suits it, and the whole is marked
+ * `estimated`:
+ *
+ * - **The poverty guidelines** track inflation, and are indexed at the same
+ *   assumed rate the Medicare thresholds use.
+ * - **The benchmark premium** is a medical price and has outrun inflation, so
+ *   it uses `premiumMultiple` — the same fading curve as the Part B premium,
+ *   for the same reason: a rate that outruns prices for a decade is history,
+ *   and one that does it for fifty years is a claim nobody makes.
+ * - **The applicable percentages** are held. They are set by Revenue
+ *   Procedure, not indexed, and inventing a schedule of them would be making
+ *   up law rather than extrapolating a price.
+ */
+export interface AcaTable {
+  year: number
+  estimated?: boolean
+  fplBase: number
+  fplPerExtraPerson: number
+  benchmark40Monthly: number
+  percentages: PercentageTier[]
+}
+
+export function acaTableFor(year: number): AcaTable {
+  const published: AcaTable = {
+    year: ACA_YEAR,
+    fplBase: FPL_BASE,
+    fplPerExtraPerson: FPL_PER_EXTRA_PERSON,
+    benchmark40Monthly: BENCHMARK_40_MONTHLY,
+    percentages: APPLICABLE_PERCENTAGE,
+  }
+  const ahead = Math.floor(year) - ACA_YEAR
+  if (ahead <= 0) return published
+
+  /**
+   * Stated in today's dollars, because that is what it is compared against.
+   *
+   * `acaCostFor` is handed a MAGI that `simulate` has already deflated to
+   * today's money. Rolling the poverty line forward *nominally* and testing a
+   * real income against it would make the cliff recede a little further every
+   * year for no reason but the calendar — which is precisely the mistake
+   * `lib/irmaa.ts` records making with its own thresholds, where it "made the
+   * room look bigger every year" and came out 41% too big by 69.
+   *
+   * So the two move by what they do in *real* terms:
+   *
+   * - The poverty guidelines track inflation, so in today's money they are
+   *   flat. Held, and that is a result rather than a refusal to model.
+   * - The benchmark premium has outrun inflation, so in today's money it
+   *   rises — by premium growth net of indexation, on the same fading curve
+   *   the Part B premium uses, for the same reason.
+   */
+  const realPremiumGrowth =
+    premiumMultiple(ahead) / Math.pow(1 + ASSUMED_INDEXATION, ahead)
+
+  return {
+    year: Math.floor(year),
+    estimated: true,
+    fplBase: FPL_BASE,
+    fplPerExtraPerson: FPL_PER_EXTRA_PERSON,
+    benchmark40Monthly: Math.round(BENCHMARK_40_MONTHLY * realPremiumGrowth),
+    percentages: APPLICABLE_PERCENTAGE,
+  }
+}
+
+export function povertyLine(
+  householdSize: number,
+  year: number = ACA_YEAR,
+): number {
   const people = Math.max(1, Math.floor(householdSize))
-  return FPL_BASE + (people - 1) * FPL_PER_EXTRA_PERSON
+  const table = acaTableFor(year)
+  return table.fplBase + (people - 1) * table.fplPerExtraPerson
 }
 
 /**
@@ -241,9 +333,9 @@ export const CHILD_AGE = 21
  * Nothing reached that path while a household could only be one or two adults.
  * Letting dependents in is what makes it reachable, so it is fixed first.
  */
-export function benchmarkAnnualFor(ages: number[]): number {
+export function benchmarkAnnualFor(ages: number[], year: number = ACA_YEAR): number {
   if (ages.length === 0) return 0
-  const perUnit = (BENCHMARK_40_MONTHLY / AGE_FACTOR[40]) * 12
+  const perUnit = (acaTableFor(year).benchmark40Monthly / AGE_FACTOR[40]) * 12
 
   const adults = ages.filter((a) => a >= CHILD_AGE)
   // Oldest first, so the cap drops the youngest — which is the way round the
@@ -302,10 +394,22 @@ export interface AcaCost {
  * rates each head separately. Passing a size and a single age let those two
  * agree about the household while disagreeing about who was in it.
  */
-export function acaCostFor(magi: number, ages: number[]): AcaCost {
-  const line = povertyLine(ages.length)
+export function acaCostFor(
+  magi: number,
+  ages: number[],
+  /**
+   * The year being priced, so a plan reaching 2035 is not charged the 2026
+   * poverty line against 2035 income.
+   *
+   * Defaults to the published year, which is what every caller did implicitly
+   * before this existed. `simulate` passes the row's own year, exactly as it
+   * already does for the IRMAA table beside it.
+   */
+  year: number = ACA_YEAR,
+): AcaCost {
+  const line = povertyLine(ages.length, year)
   const fplRatio = line > 0 ? magi / line : 0
-  const benchmark = benchmarkAnnualFor(ages)
+  const benchmark = benchmarkAnnualFor(ages, year)
   const overCliff = fplRatio > CLIFF
 
   // Below the poverty line the marketplace credit does not apply: that is

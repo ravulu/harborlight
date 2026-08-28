@@ -34,6 +34,21 @@ export const EVENT_NAMES = [
    * from one they never find.
    */
   'register_started',
+  /**
+   * The three things local mode adds, and the questions they answer.
+   *
+   * Keeping plans in a browser creates problems a database does not have, and
+   * these say whether the answers to them are found. Does anybody take a copy
+   * before the browser eats it — and is `Forget` reached by people who meant
+   * to, or stumbled into. A control nobody presses is as much a finding as one
+   * everybody does.
+   *
+   * Milestones, never figures — the same contract every other name here keeps.
+   * That a copy was taken, not what was in it.
+   */
+  'copy_downloaded',
+  'copy_imported',
+  'storage_forgotten',
 ] as const
 
 export type EventName = (typeof EVENT_NAMES)[number]

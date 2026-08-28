@@ -1,3 +1,5 @@
+import { isAdminEmail } from '@/lib/admin'
+import { isLocal } from '@/lib/persistence'
 import Link from 'next/link'
 import Image from 'next/image'
 import { headers } from 'next/headers'
@@ -59,7 +61,7 @@ export default async function HomePage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(appJsonLd()) }}
       />
-      <SiteHeader isAuthed={isAuthed} />
+      <SiteHeader isAuthed={isAuthed} isAdmin={isAdminEmail(session?.user?.email)} />
 
       {/* Hero */}
       <section className="relative overflow-hidden">
@@ -90,12 +92,17 @@ export default async function HomePage() {
               >
                 Start planning <ArrowRight className="size-4" />
               </Link>
-              <Link
-                href={isAuthed ? '/dashboard' : '/sign-up'}
-                className={buttonVariants({ variant: 'outline', size: 'lg' })}
-              >
-                {isAuthed ? 'My plans' : 'Create free account'}
-              </Link>
+              {/* An account is what keeps a plan in cloud mode. In local
+                  mode the browser does that, so there is nothing to offer
+                  here and nowhere for this to go. */}
+              {!isLocal && (
+                <Link
+                  href={isAuthed ? '/dashboard' : '/sign-up'}
+                  className={buttonVariants({ variant: 'outline', size: 'lg' })}
+                >
+                  {isAuthed ? 'My plans' : 'Create free account'}
+                </Link>
+              )}
               {/* The lighter way in. Somebody who is not ready to build a
                   whole projection will still answer "what would it take to
                   have a million", and that page hands them across when they

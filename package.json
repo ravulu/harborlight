@@ -18,7 +18,9 @@
     "db:secure": "tsx scripts/db-secure.mts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "watch:figures": "tsx cron-jobs/watch-published.mts",
+    "propose:figures": "tsx cron-jobs/propose-figures.mts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

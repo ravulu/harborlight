@@ -1,3 +1,4 @@
+import { isAdminEmail } from '@/lib/admin'
 import { headers } from 'next/headers'
 import { auth } from '@/lib/auth'
 import { SiteHeader } from '@/components/site-header'
@@ -24,7 +25,7 @@ export default async function GoalPage() {
 
   return (
     <div className="min-h-svh bg-background">
-      <SiteHeader isAuthed={!!session?.user} />
+      <SiteHeader isAuthed={!!session?.user} isAdmin={isAdminEmail(session?.user?.email)} />
       <main className="mx-auto max-w-5xl px-4 py-8">
         <div className="mb-6 flex flex-col gap-1">
           <h1 className="font-serif text-3xl font-medium text-foreground text-balance">

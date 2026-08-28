@@ -1,3 +1,10 @@
+import {
+  HSA_CATCH_UP,
+  HSA_CATCH_UP_AGE,
+  HSA_LIMIT_FAMILY,
+  HSA_LIMIT_SELF,
+  HSA_YEAR,
+} from '@/lib/hsa'
 import type { PlanInputs, PlanResult } from '@/lib/retirement'
 import type { MonteCarloResult } from '@/lib/monte-carlo'
 import { FEDERAL, CAPITAL_GAINS, taxableSocialSecurity } from '@/lib/tax'
@@ -476,7 +483,7 @@ export function buildInsights(
 
   // 10. The only account taxed nowhere at all, if it is spent on health.
   if (yearsWorking > 0 && inputs.currentAge < 65) {
-    const catchUp = inputs.currentAge >= 55
+    const catchUp = inputs.currentAge >= HSA_CATCH_UP_AGE
     const hasHsa = inputs.hsaBalance > 0 || inputs.hsaMonthlyContribution > 0
     const atRetirement = result.rows.find((r) => r.phase === 'retirement')
 
@@ -500,8 +507,8 @@ export function buildInsights(
         priority: 25,
         title: 'An HSA is the only account taxed at neither end',
         body:
-          `If you are on a high-deductible health plan, ${money(4400)} on your own or ${money(8750)} for a ` +
-          `family goes in untaxed in 2026${catchUp ? `, plus ${money(1000)} from 55` : ''}, grows untaxed, and comes out ` +
+          `If you are on a high-deductible health plan, ${money(HSA_LIMIT_SELF)} on your own or ${money(HSA_LIMIT_FAMILY)} for a ` +
+          `family goes in untaxed in ${HSA_YEAR}${catchUp ? `, plus ${money(HSA_CATCH_UP)} from ${HSA_CATCH_UP_AGE}` : ''}, grows untaxed, and comes out ` +
           `untaxed for medical costs — which are the expense this plan is least able to predict. After 65 ` +
           `anything else it is spent on is taxed like a 401(k) withdrawal but without a penalty, so it is ` +
           `a retirement account that happens to be free if health costs arrive. Contributions stop when ` +

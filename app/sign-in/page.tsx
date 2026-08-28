@@ -1,3 +1,4 @@
+import { isLocal } from '@/lib/persistence'
 import { auth } from '@/lib/auth'
 import { cookies } from 'next/headers'
 import {
@@ -31,7 +32,7 @@ export default async function SignInPage() {
     <div className="flex min-h-svh flex-col bg-background">
       <SiteHeader isAuthed={false} />
       <main className="flex flex-1 items-center justify-center px-4 py-12">
-        <AuthForm mode="sign-in" rememberedEmail={rememberedEmail} />
+        <AuthForm adminOnly={isLocal} mode="sign-in" rememberedEmail={rememberedEmail} />
       </main>
       <SiteFooter />
     </div>

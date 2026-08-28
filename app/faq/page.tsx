@@ -1,3 +1,4 @@
+import { isAdminEmail } from '@/lib/admin'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { SiteHeader } from '@/components/site-header'
@@ -36,7 +37,7 @@ export default async function FaqPage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd(FAQ)) }}
       />
-      <SiteHeader isAuthed={!!session?.user} />
+      <SiteHeader isAuthed={!!session?.user} isAdmin={isAdminEmail(session?.user?.email)} />
 
       <main className="mx-auto max-w-3xl px-4 py-16 lg:py-20">
         <div className="mb-10 flex flex-col gap-3">

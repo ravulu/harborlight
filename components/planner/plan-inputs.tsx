@@ -683,67 +683,85 @@ function SpendingSteps({
         </button>
       </div>
 
-      <div className="grid gap-x-5 gap-y-3 @xl:grid-cols-3">
-        <NumberField
-          id="monthlyRetirementSpending"
-          label="A month in retirement"
-          value={inputs.monthlyRetirementSpending}
-          min={0}
-          max={100000}
-          step={100}
-          prefix="$"
-          placeholder="e.g. 4,000"
-          onChange={(v) => set('monthlyRetirementSpending', v)}
-        />
-        <NumberField
-          id="spendingStep1Monthly"
-          label="Then this a month"
-          value={inputs.spendingStep1Monthly}
-          min={0}
-          max={100000}
-          step={100}
-          prefix="$"
-          placeholder="0 for no change"
-          onChange={(v) => set('spendingStep1Monthly', v ?? 0)}
-        />
-        <NumberField
-          id="spendingStep2Monthly"
-          label="And then this"
-          value={inputs.spendingStep2Monthly}
-          min={0}
-          max={100000}
-          step={100}
-          prefix="$"
-          placeholder="0 for no change"
-          onChange={(v) => set('spendingStep2Monthly', v ?? 0)}
-        />
+      {/* Each amount and the age it starts at, in one cell together.
+          They used to be two rows of a three-column grid — amounts across the
+          top, ages beneath — which pairs correctly only while there are three
+          columns to pair across. Below the container breakpoint the grid
+          collapses to one, and the row order put "From 65, when you stop
+          working" under the *third* amount and each slider two fields away
+          from the figure it governs. Both sliders are labelled only "From", so
+          there was nothing left to tell them apart.
 
-        {/* The row beneath: when each figure starts. The first needs no
-            control — it starts when work stops — so it says so in the space
-            the other two put a slider in, and the three columns stay level. */}
-        <span className="self-center text-xs text-muted-foreground">
-          From {from}, when you stop working
-        </span>
-        <SliderField
-          id="spendingStep1Age"
-          under
-          label="From"
-          value={inputs.spendingStep1Age}
-          min={AGE_MIN}
-          max={AGE_MAX}
-          step={1}
-          onChange={(v) => set('spendingStep1Age', v)}
-        />
-        <SliderField
-          id="spendingStep2Age"
-          under
-          label="From"
-          value={inputs.spendingStep2Age}
-          min={AGE_MIN}
-          max={AGE_MAX}
-          step={1}
-          onChange={(v) => set('spendingStep2Age', v)}
-        />
+          Paired in the markup instead, so the association survives any number
+          of columns rather than being an accident of one. */}
+      <div className="grid gap-x-5 gap-y-3 @xl:grid-cols-3">
+        <div className="flex flex-col gap-3">
+          <NumberField
+            id="monthlyRetirementSpending"
+            label="A month in retirement"
+            value={inputs.monthlyRetirementSpending}
+            min={0}
+            max={100000}
+            step={100}
+            prefix="$"
+            placeholder="e.g. 4,000"
+            onChange={(v) => set('monthlyRetirementSpending', v)}
+          />
+          {/* No control: this one starts when work stops. It says so in the
+              space the other two put a slider in, and `flex-1` centres it
+              against them so the three columns still read as a row. */}
+          <span className="flex flex-1 items-center text-xs text-muted-foreground">
+            From {from}, when you stop working
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <NumberField
+            id="spendingStep1Monthly"
+            label="Then this a month"
+            value={inputs.spendingStep1Monthly}
+            min={0}
+            max={100000}
+            step={100}
+            prefix="$"
+            placeholder="0 for no change"
+            onChange={(v) => set('spendingStep1Monthly', v ?? 0)}
+          />
+          <SliderField
+            id="spendingStep1Age"
+            under
+            label="From"
+            value={inputs.spendingStep1Age}
+            min={AGE_MIN}
+            max={AGE_MAX}
+            step={1}
+            onChange={(v) => set('spendingStep1Age', v)}
+          />
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <NumberField
+            id="spendingStep2Monthly"
+            label="And then this"
+            value={inputs.spendingStep2Monthly}
+            min={0}
+            max={100000}
+            step={100}
+            prefix="$"
+            placeholder="0 for no change"
+            onChange={(v) => set('spendingStep2Monthly', v ?? 0)}
+          />
+          <SliderField
+            id="spendingStep2Age"
+            under
+            label="From"
+            value={inputs.spendingStep2Age}
+            min={AGE_MIN}
+            max={AGE_MAX}
+            step={1}
+            onChange={(v) => set('spendingStep2Age', v)}
+          />
+        </div>
       </div>
 
       <p className="text-xs leading-relaxed text-muted-foreground">

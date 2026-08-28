@@ -1,6 +1,6 @@
 /**
- * 2026 state individual income tax schedules, used to estimate an effective
- * rate on retirement withdrawals.
+ * State individual income tax schedules, used to estimate an effective rate on
+ * retirement withdrawals.
  *
  * Brackets and standard deductions are from the Tax Foundation's 2026 state
  * tables, for single and married-filing-jointly filers. `retirementExempt`
@@ -12,6 +12,29 @@
  * married brackets by varying amounts and guessing would be worse than saying
  * the number is rough.
  */
+/**
+ * The year these schedules are law for.
+ *
+ * The last of the annually-published tables to get one. Federal brackets,
+ * IRMAA and ACA have carried a year and a failing test since they were
+ * written; these fifty schedules carried a year in a comment and nothing that
+ * noticed when the calendar passed it — so on 1 January they would have gone
+ * on charging the previous year's state brackets indefinitely, silently, which
+ * is the one outcome the other three exist to prevent.
+ *
+ * Unlike the federal table there is no roll-forward. Fifty states index on
+ * fifty schedules — some annually, some never, some by statute and some by
+ * revenue trigger — and a single assumed rate applied across all of them would
+ * be a worse answer than last year's real figures plus a warning.
+ */
+export const STATE_TAX_YEAR = 2026
+
+/** Where these came from, for the watcher and for the page. */
+export const STATE_TAX_SOURCE = {
+  title: 'Tax Foundation, State Individual Income Tax Rates and Brackets, 2026',
+  url: 'https://taxfoundation.org/data/all/state/state-income-tax-rates/',
+} as const
+
 export interface Bracket {
   /** percent */
   rate: number

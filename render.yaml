@@ -36,6 +36,16 @@ services:
       - key: NEXT_PUBLIC_SITE_URL
         sync: false
 
+      # Where figures are kept: local | cloud. Unset means local, which is
+      # the safe direction — a deployment that forgets this keeps nothing on
+      # the server. Only the exact string "cloud" turns the database on.
+      #
+      # Read at BUILD time like NEXT_PUBLIC_SITE_URL above: changing it needs
+      # a rebuild, not a restart. Local mode still needs DATABASE_URL —
+      # analytics and feedback are server-side either way.
+      - key: NEXT_PUBLIC_PERSISTENCE
+        value: local
+
       # --- Access. Empty or unset means nobody may open /admin. -----------
       - key: ADMIN_EMAILS
         sync: false

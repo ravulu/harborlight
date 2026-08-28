@@ -11,12 +11,20 @@ import {
   type ChartConfig,
 } from '@/components/ui/chart'
 
-// The brand palette is all one green family, which three stacked bands
-// cannot be told apart in. Two greens separated by lightness for the money
-// that reaches you, and a neutral for the tax — which is not yours to spend,
-// so reading differently is the point.
+// The brand palette is all one green family, which stacked bands cannot be
+// told apart in without being chosen carefully. These four were checked rather
+// than judged: every adjacent pair clears the normal-vision and colour-vision
+// separation floors in both themes, which the obvious assignment — the two
+// mid-greens next to each other — does not. Keep the slots if a colour here
+// ever changes, and re-check the neighbours.
+//
+// Greens separated by lightness for money that reaches you, and a neutral for
+// the tax, which is not yours to spend — so reading differently is the point.
+// The darkest band sits under 3:1 against the surface, which is why the legend
+// labels it and the Yearly detail tab carries the same figures as a table.
 const config = {
-  socialSecurity: { label: 'Social Security', color: 'var(--chart-2)' },
+  socialSecurity: { label: 'Social Security', color: 'var(--chart-4)' },
+  otherIncome: { label: 'Pension and other income', color: 'var(--chart-1)' },
   kept: { label: 'Withdrawal kept', color: 'var(--chart-5)' },
   taxes: { label: 'Tax', color: 'var(--muted-foreground)' },
 } satisfies ChartConfig
@@ -25,6 +33,15 @@ const config = {
  * Where each retirement year's money comes from, and what tax takes off the
  * top. Stacked so the bands sum to the gross income for that year: the
  * balance chart cannot show any of this.
+ *
+ * Pension and other income is a band of its own. It funds a year exactly as
+ * the benefit does, and for a while it was on no band at all — so a household
+ * with a pension or a rental was shown a chart that understated its own income
+ * and gave no hint which part was missing.
+ *
+ * This splits the year by *character*: money that arrives, money drawn from
+ * savings, and tax. `FundingMix` below splits the same year by *account*,
+ * which is the other question and needs a different form to answer.
  */
 export function IncomeChart({
   result,
@@ -40,6 +57,7 @@ export function IncomeChart({
         .map((r) => ({
           age: r.age,
           socialSecurity: Math.round(r.socialSecurity),
+          otherIncome: Math.round(r.otherIncome),
           kept: Math.round(Math.max(0, r.withdrawals - r.taxes)),
           taxes: Math.round(r.taxes),
         })),
@@ -117,6 +135,15 @@ export function IncomeChart({
           stackId="income"
           stroke="var(--color-socialSecurity)"
           fill="var(--color-socialSecurity)"
+          fillOpacity={0.8}
+          strokeWidth={1.5}
+        />
+        <Area
+          type="monotone"
+          dataKey="otherIncome"
+          stackId="income"
+          stroke="var(--color-otherIncome)"
+          fill="var(--color-otherIncome)"
           fillOpacity={0.8}
           strokeWidth={1.5}
         />

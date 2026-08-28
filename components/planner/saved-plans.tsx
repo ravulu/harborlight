@@ -3,15 +3,13 @@
 import { useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import type { RetirementPlan } from '@/lib/db/schema'
+import type { PlanSummary } from '@/lib/store'
 import { formatCurrency } from '@/lib/retirement'
 import { simulate } from '@/lib/retirement'
 import { runMonteCarlo } from '@/lib/monte-carlo'
-import { planToInputs } from '@/lib/plan'
-import { deletePlan } from '@/app/actions/plans'
 import { Card } from '@/components/ui/card'
 import { Button, buttonVariants } from '@/components/ui/button'
-import { Trash2, ArrowRight, CircleCheck, CircleAlert, Plus, Columns3 } from 'lucide-react'
+import { Download, Trash2, ArrowRight, CircleCheck, CircleAlert, Plus, Columns3 } from 'lucide-react'
 import { PlanCompare, type Computed } from './plan-compare'
 import { cn } from '@/lib/utils'
 
@@ -48,21 +46,26 @@ function PlanRow({
   first,
   selected,
   onToggle,
+  onDelete,
+  onDownload,
 }: {
   c: Computed
   /** No rule above the first row: the card's own edge is already there. */
   first: boolean
   selected: boolean
   onToggle: (id: number) => void
+  onDelete: (id: number) => Promise<void>
+  onDownload?: (plan: PlanSummary) => Promise<void>
 }) {
   const plan = c.plan
+  const inputs = c.inputs
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [confirming, setConfirming] = useState(false)
   const lasts = c.result.lastsThroughRetirement
   const confidence = Math.round(c.mc.successRate * 100)
   const money = formatCurrency(c.mc.balanceAtRetirement.median, { compact: true })
-  const ends = lasts ? `to ${plan.endAge}` : `out at ${c.result.depletionAge}`
+  const ends = lasts ? `to ${inputs.endAge}` : `out at ${c.result.depletionAge}`
 
   return (
     <div
@@ -95,7 +98,7 @@ function PlanRow({
             them. Below `lg` the four stats are hidden rather than wrapped:
             a row that wraps stops being a row. */}
         <span className="truncate text-xs text-muted-foreground lg:hidden">
-          {confidence}% · retires {plan.retirementAge} · {money} · lasts {ends}
+          {confidence}% · retires {inputs.retirementAge} · {money} · lasts {ends}
         </span>
       </div>
 
@@ -105,7 +108,7 @@ function PlanRow({
           label="Confidence"
           className={confidence >= 90 ? 'text-primary' : undefined}
         />
-        <Stat value={String(plan.retirementAge)} label="Retires" />
+        <Stat value={String(inputs.retirementAge)} label="Retires" />
         {/* "Projected", not "At retirement": thirteen letter-spaced characters
             do not fit the column, and the sentence this replaced called it
             projected too. */}
@@ -133,6 +136,22 @@ function PlanRow({
           and nothing in the code could account for it; a delete that happens on
           the first click of a small icon beside an Open button is at least a
           candidate. Asking costs a second and rules it out. */}
+      {onDownload && !confirming && (
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={pending}
+          title={`Save "${plan.name}" as a file`}
+          onClick={() =>
+            startTransition(async () => {
+              await onDownload(plan)
+            })
+          }
+        >
+          <Download className="size-3.5" />
+          <span className="sr-only">Download {plan.name}</span>
+        </Button>
+      )}
       {confirming ? (
         <span className="flex shrink-0 items-center gap-1">
           <Button
@@ -141,7 +160,7 @@ function PlanRow({
             disabled={pending}
             onClick={() =>
               startTransition(async () => {
-                await deletePlan(plan.id)
+                await onDelete(plan.id)
                 router.refresh()
               })
             }
@@ -167,14 +186,36 @@ function PlanRow({
   )
 }
 
-export function SavedPlans({ plans }: { plans: RetirementPlan[] }) {
+export function SavedPlans({
+  plans,
+  onDelete,
+  onDownload,
+}: {
+  plans: PlanSummary[]
+  /**
+   * Removing a plan, handed in rather than imported.
+   *
+   * This list is the same list whether the plans came from Postgres or from
+   * the browser, and a component that imports one particular delete is a
+   * component that has picked a side. The caller knows which store it is on;
+   * this does not need to.
+   */
+  onDelete: (id: number) => Promise<void>
+  /**
+   * Keeping one plan as a file, named after itself.
+   *
+   * Handed in like `onDelete`, so this list still does not know where its
+   * plans live. Absent in cloud mode, where the database is already the copy.
+   */
+  onDownload?: (plan: PlanSummary) => Promise<void>
+}) {
   // Simulated once here rather than in each row and again in each column: two
   // components working the same plan out separately is how they end up
   // quoting different figures for it.
   const computed = useMemo<Computed[]>(
     () =>
       plans.map((plan) => {
-        const inputs = planToInputs(plan)
+        const inputs = plan.inputs
         return { plan, inputs, result: simulate(inputs), mc: runMonteCarlo(inputs) }
       }),
     [plans],
@@ -262,6 +303,8 @@ export function SavedPlans({ plans }: { plans: RetirementPlan[] }) {
           c={c}
           first={i === 0}
           selected={picked.includes(c.plan.id)}
+          onDelete={onDelete}
+          onDownload={onDownload}
           onToggle={(id) => {
             toggle(id)
             // Dropping below two leaves nothing to compare.

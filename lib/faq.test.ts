@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { FAQ } from '@/lib/faq'
+import { isLocal } from '@/lib/persistence'
 import { DEFAULT_INPUTS, simulate, type PlanInputs } from '@/lib/retirement'
 import { MEDICARE_AGE, povertyLine, CLIFF } from '@/lib/aca'
 import { IRMAA_TIERS_2026, LOOKBACK_YEARS } from '@/lib/irmaa'
@@ -143,5 +144,68 @@ describe('claims the engine has to keep true', () => {
   it('quotes the penalty-free age the engine actually uses', () => {
     expect(PENALTY_FREE_AGE).toBe(59.5)
     expect(all).toContain('59½')
+  })
+})
+
+/**
+ * What the FAQ may say about where figures live.
+ *
+ * The answers vary by deployment because the truth does: in local mode there
+ * are no accounts and nothing of yours reaches a server, and an FAQ still
+ * offering to store your plans against an account would be describing a
+ * different build of the same app. Copy claims are tested here for the same
+ * reason the windows prose is — the promise is the feature.
+ */
+describe.runIf(isLocal)('the FAQ in local mode', () => {
+  const all = FAQ.map((x) => `${x.q} ${x.a}`).join('\n')
+
+  it('never offers an account, because there is not one to offer', () => {
+    // The claims, not the words. An answer saying there is *no* sign-up
+    // necessarily contains "sign up", and banning the phrase would forbid the
+    // one sentence most worth keeping.
+    expect(all).not.toMatch(/an account exists only so you can save/i)
+    expect(all).not.toMatch(/stored against your account/i)
+    expect(all).not.toMatch(/sign in to save/i)
+    expect(all).not.toMatch(/create an account to/i)
+    // And the positive half: it says outright that there is none.
+    expect(answer('Is Fairwater a free retirement calculator').a).toMatch(
+      /no account|there is no sign-up/i,
+    )
+  })
+
+  it('does not send the reader to a page that answers 404 here', () => {
+    // `/dashboard` is gone in local mode; the saved-plans list lives on the
+    // planner. An answer naming "My plans" would be an instruction to visit
+    // a page that no longer exists — worse than no instruction.
+    expect(all).not.toMatch(/My plans/)
+  })
+
+  it('says plainly that nothing reaches us, and that we could not look', () => {
+    const privacy = answer('Is my financial information private')
+    expect(privacy.a).toMatch(/never reaches us|nothing you enter ever reaches us/i)
+    expect(privacy.a).toMatch(/could not tell you|cannot read|nowhere anybody here can read/i)
+    // The one claim that must survive any rewrite: no figure is recorded.
+    expect(privacy.a).toMatch(/never a figure you typed/i)
+  })
+
+  /**
+   * The three things a reader has to know before trusting browser storage,
+   * and the two controls that answer them. `lib/holdings-store.ts` removed
+   * browser storage the first time precisely because a machine is shared;
+   * storing deliberately is only defensible if the page says so.
+   */
+  it('warns what browser storage costs, and names the way out', () => {
+    const kept = answer('Where are my saved plans kept')
+    expect(kept.a).toMatch(/clearing your browsing data/i)
+    expect(kept.a).toMatch(/anyone else who uses this browser/i)
+    expect(kept.a).toMatch(/will not follow you/i)
+    expect(kept.a).toMatch(/Download a copy/)
+    expect(kept.a).toMatch(/Forget/)
+  })
+
+  it('does not claim saving makes a file, because it does not', () => {
+    expect(answer('Where are my saved plans kept').a).toMatch(
+      /does not make a file/i,
+    )
   })
 })

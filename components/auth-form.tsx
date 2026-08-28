@@ -21,10 +21,21 @@ import {
 export function AuthForm({
   mode,
   rememberedEmail = '',
+  adminOnly = false,
 }: {
   mode: 'sign-in' | 'sign-up'
   /** Read from the cookie while rendering, so the box is filled on first paint. */
   rememberedEmail?: string
+  /**
+   * Whether only allowlisted addresses can get in.
+   *
+   * True in local mode, where an account holds nothing and exists solely to
+   * reach `/admin`. Said on the page because the alternative is somebody
+   * filling in a form that was never going to work for them — the refusal
+   * comes from the endpoint either way, and being told before is kinder than
+   * being told after.
+   */
+  adminOnly?: boolean
 }) {
   const router = useRouter()
   // Only ever a path on this site. A next= pointing anywhere else would turn
@@ -107,12 +118,20 @@ export function AuthForm({
     <Card className="w-full max-w-sm p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          {isSignUp ? 'Create an account' : 'Welcome back'}
+          {adminOnly
+            ? isSignUp
+              ? 'Set an administrator password'
+              : 'Administrator sign-in'
+            : isSignUp
+              ? 'Create an account'
+              : 'Welcome back'}
         </h1>
         <p className="text-sm text-muted-foreground mt-1">
-          {isSignUp
-            ? 'Sign up to get started'
-            : 'Sign in to your account to continue'}
+          {adminOnly
+            ? 'Only addresses on this deployment’s administrator list can sign in. Plans are kept in your browser and need no account.'
+            : isSignUp
+              ? 'Sign up to get started'
+              : 'Sign in to your account to continue'}
         </p>
       </div>
 
@@ -201,7 +220,13 @@ export function AuthForm({
       </form>
 
       <p className="text-sm text-muted-foreground text-center mt-6">
-        {isSignUp ? 'Already have an account? ' : "Don't have an account? "}
+        {adminOnly
+          ? isSignUp
+            ? 'Already set a password? '
+            : 'No password set yet? '
+          : isSignUp
+            ? 'Already have an account? '
+            : "Don't have an account? "}
         {/* Carries the return path across: someone sent here to save a plan
             who chooses to create an account instead must still come back to
             it, or the work is dropped by the one link that looked harmless. */}
@@ -211,7 +236,13 @@ export function AuthForm({
           }`}
           className="text-foreground font-medium underline-offset-4 hover:underline"
         >
-          {isSignUp ? 'Sign in' : 'Sign up'}
+          {adminOnly
+            ? isSignUp
+              ? 'Sign in'
+              : 'Set one'
+            : isSignUp
+              ? 'Sign in'
+              : 'Sign up'}
         </Link>
       </p>
     </Card>

@@ -29,8 +29,8 @@ import {
 import { runMonteCarlo } from '@/lib/monte-carlo'
 import type { MonteCarloResult } from '@/lib/monte-carlo'
 import { compareClaimAges, suggestFixes, TARGET_CONFIDENCE } from '@/lib/suggestions'
-import { savePlan, updatePlan } from '@/app/actions/plans'
-import { savePlanRegister } from '@/app/actions/balance-sheet'
+import { isLocal } from '@/lib/persistence'
+import { hasBeenTold, recordTold, requireStore } from '@/lib/store'
 import { stashPending } from '@/lib/holdings-store'
 import { PlanInputsPanel, ClearingInput } from './plan-inputs'
 import { Label } from '@/components/ui/label'
@@ -40,6 +40,7 @@ import { EMPTY_REGISTER } from '@/lib/balance-sheet'
 import { PlanSummary } from './plan-summary'
 import { ProjectionChart } from './projection-chart'
 import { IncomeChart } from './income-chart'
+import { FundingMix } from './funding-mix'
 import { TaxPhases } from './tax-phases'
 import { ConfidenceBadge } from './confidence-badge'
 import { Card } from '@/components/ui/card'
@@ -107,6 +108,8 @@ interface RetirementPlannerProps {
    * settled draft rather than the raw one, so it follows the same beat as
    * everything else expensive here.
    */
+  /** Told once a plan has been stored, so a list elsewhere can re-read. */
+  onStored?: () => void
   onLiquidChange?: (total: number) => void
   /** Ordinary income by age, so a sale can be priced against the right year. */
   onIncomeByAge?: (byAge: Map<number, number>) => void
@@ -171,6 +174,7 @@ export function RetirementPlanner({
   planId,
   initialDraft,
   saveOnArrival = false,
+  onStored,
   onLiquidChange,
   onIncomeByAge,
   household,
@@ -426,15 +430,21 @@ export function RetirementPlanner({
         // The plan would store and the register would not, and the only sign
         // was that the button never said "Saved".
         try {
-          let id = planId
-          if (id) {
-            await updatePlan(id, name, personName, plan)
-          } else {
-            const row = await savePlan(name, personName, plan)
-            id = row?.id
+          // One call, both halves. The store writes the register with the
+          // plan — in Postgres that is a second table, in the browser it is a
+          // nested object — so there is no longer a window where the plan is
+          // stored and what it assumes is not.
+          const store = requireStore()
+          const draftPlan = {
+            name,
+            personName,
+            inputs: plan,
+            register: register ?? { holdings: [], liabilities: [] },
           }
+          let id = planId
+          if (id) await store.update(id, draftPlan)
+          else id = await store.save(draftPlan)
           if (!id) throw new Error('The plan was not stored, so there was nothing to attach to.')
-          await savePlanRegister(id, register ?? { holdings: [], liabilities: [] })
 
           // The plan is stored now, so the draft has served its purpose.
           clearDraftCookie()
@@ -442,6 +452,7 @@ export function RetirementPlanner({
           setError(null)
           setSaved(true)
           setTimeout(() => setSaved(false), 2000)
+          onStored?.()
           // Carry the id in the URL so the next press updates this plan rather
           // than making another, and so a reload comes back to it.
           if (!planId && id) {
@@ -460,7 +471,7 @@ export function RetirementPlanner({
         }
       })
     },
-    [planId, name, personName, register, router],
+    [planId, name, personName, register, router, onStored],
   )
 
   const [copied, setCopied] = useState(false)
@@ -473,20 +484,65 @@ export function RetirementPlanner({
     const fresh =
       typed && typed !== (initialName ?? '').trim() ? typed : `${typed || 'Plan'} copy`
     startTransition(async () => {
-      const row = await savePlan(fresh, personName, inputs)
       // A copy of a plan is a copy of what it assumed, or it is not a copy.
-      if (row?.id && register) await savePlanRegister(row.id, register)
+      const id = await requireStore().save({
+        name: fresh,
+        personName,
+        inputs,
+        register: register ?? { holdings: [], liabilities: [] },
+      })
       clearDraftCookie()
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+      onStored?.()
       // Land on the copy, so the next edit changes it rather than the original.
-      router.push(`/planner?plan=${row.id}`)
+      router.push(`/planner?plan=${id}`)
       router.refresh()
     })
-  }, [inputs, name, initialName, personName, router])
+  }, [inputs, name, initialName, personName, register, router, onStored])
+
+  /**
+   * What the button says, decided in one place.
+   *
+   * "Sign in to save" is a cloud-mode sentence: it is true only where an
+   * account is what keeps a plan. In local mode the plan is kept on this
+   * machine, and the button says so — the words are the disclosure, and they
+   * arrive at the moment the decision is made rather than in a paragraph
+   * somebody may not read. Updating an existing plan needs no such warning:
+   * it was given the first time.
+   */
+  /**
+   * The first save on a browser says what it is about to do, and waits.
+   *
+   * "Save on this device" was the first wording and it was wrong in a way
+   * that only showed up in use: it reads as *write a file to my computer*,
+   * and the first person to press it went looking in their Downloads folder.
+   * "In this browser" is both what actually happens and what nothing else on
+   * the page could mean — and the disclosure now says outright that no file is
+   * made, because the button that does make one is sitting next to it.
+   *
+   * Once per browser, not once per save: a warning repeated every time is a
+   * warning nobody reads by the third one. The second press is the answer, so
+   * there is no dialog to dismiss and nothing to tab through — the button
+   * changes what it says, and saying yes is pressing the same thing again.
+   */
+  const [asking, setAsking] = useState(false)
+
+  const saveLabel = asking
+    ? 'Yes — keep it in this browser'
+    : !isAuthed && !isLocal
+    ? 'Sign in to save'
+    : planId
+      ? 'Update plan'
+      : isLocal
+        ? 'Save in this browser'
+        : 'Save plan'
 
   const handleSave = () => {
-    if (!isAuthed) {
+    // Local mode has no sign-in to send anybody to, and nothing to carry
+    // across one. The figures are already on this machine; pressing save
+    // writes them where they are.
+    if (!isAuthed && !isLocal) {
       // Keep the work. Written here rather than on every keystroke: someone
       // signed out has asked for nothing until they press this, and pressing
       // it is exactly the moment their figures are worth carrying across a
@@ -508,6 +564,13 @@ export function RetirementPlanner({
     }
 
     if (!inputs) return
+
+    if (isLocal && !asking && !hasBeenTold(window.localStorage)) {
+      setAsking(true)
+      return
+    }
+    if (isLocal) recordTold(window.localStorage)
+    setAsking(false)
     persist(inputs)
   }
 
@@ -590,7 +653,13 @@ export function RetirementPlanner({
         <Button
           size="lg"
           onClick={handleSave}
-          disabled={pending || (isAuthed && !inputs)}
+          // `isAuthed || isLocal` — anywhere a press would actually store
+          // something. In cloud mode signed out the press goes to sign-in and
+          // is useful with an incomplete plan; everywhere else `handleSave`
+          // returns silently on a plan too incomplete to simulate, and a
+          // button that does nothing and says nothing is the failure this
+          // project keeps writing down.
+          disabled={pending || ((isAuthed || isLocal) && !inputs)}
           className="gap-2 px-4 shadow-sm"
         >
           {saved ? (
@@ -604,11 +673,7 @@ export function RetirementPlanner({
                   The balance sheet writes itself as it is typed; this
                   button keeps a version of the plan. "Save" alone read
                   as though nothing else was being kept. */}
-              {isAuthed
-                ? planId
-                  ? 'Update plan'
-                  : 'Save plan'
-                : 'Sign in to save'}
+              {saveLabel}
             </>
           )}
         </Button>
@@ -650,10 +715,21 @@ export function RetirementPlanner({
             signed-out one is being told the thing the button does not say:
             that the projection is already theirs, and that leaving without an
             account is what loses it. */}
-        {!isAuthed && (
+        {/* What pressing it will actually do, which differs by where plans
+            are kept. Signed out in cloud mode the point is that the account is
+            what keeps this; in local mode the point is that the machine is,
+            and that the machine is shared with whoever else uses it. */}
+        {!isAuthed && !isLocal && (
           <span className="max-w-xs text-xs text-muted-foreground text-pretty">
             Your projection is right here without an account. Sign in to save it
             for next time, along with your assets and liabilities.
+          </span>
+        )}
+        {isLocal && !planId && (
+          <span className="max-w-xs text-xs text-muted-foreground text-pretty">
+            {asking
+              ? 'Press again to keep it here. It stays inside this browser — no file is made — is not sent anywhere, and anyone else using this browser can open it.'
+              : 'Saved plans stay inside this browser. No file is made — “Download a copy” above does that. They are not sent anywhere, they will not follow you to another computer or another browser, and anyone else using this one can open them.'}
           </span>
         )}
     </div>
@@ -676,17 +752,21 @@ export function RetirementPlanner({
    */
   const saveRow = (
     <div className="flex flex-wrap items-center justify-end gap-3 rounded-xl border border-border bg-card/95 px-5 py-3 shadow-lg backdrop-blur">
-      <span className="mr-auto text-xs text-muted-foreground">
-        {saved
-          ? 'Kept.'
-          : changed
-            ? 'Not saved yet — ⌘S works too.'
-            : 'Everything here is saved.'}
+      <span className="mr-auto max-w-md text-xs text-muted-foreground text-pretty">
+        {asking
+          ? 'This keeps the plan inside this browser. It does not make a file — “Download a copy” does that. It is not sent anywhere, it will not follow you to another computer or another browser, and anyone else using this one can open it.'
+          : saved
+            ? 'Kept.'
+            : changed
+              ? isLocal
+                ? 'Not saved yet — ⌘S works too. Saving keeps it inside this browser, not as a file.'
+                : 'Not saved yet — ⌘S works too.'
+              : 'Everything here is saved.'}
       </span>
       <Button
         size="lg"
         onClick={handleSave}
-        disabled={pending || (isAuthed && !inputs) || (!changed && !saved)}
+        disabled={pending || ((isAuthed || isLocal) && !inputs) || (!changed && !saved)}
         className="gap-2 px-4 shadow-sm"
       >
         {saved ? (
@@ -696,7 +776,7 @@ export function RetirementPlanner({
         ) : (
           <>
             <Save className="size-4" />
-            {isAuthed ? (planId ? 'Update plan' : 'Save plan') : 'Sign in to save'}
+            {saveLabel}
           </>
         )}
       </Button>
@@ -844,7 +924,10 @@ export function RetirementPlanner({
               )}
             </TabsContent>
             <TabsContent value="income" className="pt-4">
-              <IncomeChart result={result} inputs={inputs} />
+              <div className="flex flex-col gap-6">
+                <IncomeChart result={result} inputs={inputs} />
+                <FundingMix result={result} />
+              </div>
             </TabsContent>
             <TabsContent value="tax" className="pt-4">
               <TaxPhases

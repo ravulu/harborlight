@@ -955,6 +955,11 @@ export function simulate(inputs: PlanInputs): PlanResult {
           // it. Children come off as they turn 26, and both the poverty line
           // and the premium step down with them.
           policyAges(age, married, inputs.dependentBirthYears, thisYear + yearsFromNow),
+          // The row's own year, so cover in 2040 is priced on 2040's assumed
+          // benchmark rather than on the last published one. Stated in today's
+          // dollars like the MAGI above it — `acaTableFor` explains why the
+          // poverty line does not move and the premium does.
+          thisYear + yearsFromNow,
         )
         const next = cost.net * inflator
         healthSubsidy = cost.subsidy * inflator
