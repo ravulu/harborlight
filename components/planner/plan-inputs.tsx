@@ -652,50 +652,31 @@ function SpendingSteps({
   return (
     <div className="flex flex-col gap-3">
 
-      {/* Each link over the boxes it fills. The estimator works out the first
-          figure; the shape fills the two steps beside it. In a row of their
-          own below, neither stood over the thing it acts on, and the shape
-          link in particular read as belonging to the figure at the far left
-          that it never touches. Above the boxes it is an offer to fill them
-          in; underneath it would be a note about having filled them. */}
-      <div className="grid gap-x-5 gap-y-2 @xl:grid-cols-3">
-        <ExpenseEstimator
-          onApply={(monthly, healthFrom65) =>
-            // Two fields: the dialog works out a monthly figure and the part
-            // of it that does not start until Medicare does.
-            setMany({
-              monthlyRetirementSpending: monthly,
-              healthAfter65Monthly: healthFrom65,
-            })
-          }
-        />
-        {/* Spanning the two boxes it fills. */}
-        <button
-          type="button"
-          onClick={
-            on
-              ? () => setMany({ spendingStep1Monthly: 0, spendingStep2Monthly: 0 })
-              : applySmile
-          }
-          className="w-fit rounded-sm text-xs font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring @xl:col-span-2"
-        >
-          {on ? 'Keep it level instead' : 'Use the usual shape'}
-        </button>
-      </div>
+      {/* Each control inside the block it fills.
+          The two links sat in a row of their own above a row of boxes, tied to
+          what they act on by column position alone — which holds only while
+          there are three columns. Below the container breakpoint both grids
+          collapse and "Use the usual shape" lands directly above "A month in
+          retirement", the one figure it never touches, which is precisely the
+          reading an earlier note says the layout was arranged to prevent.
 
-      {/* Each amount and the age it starts at, in one cell together.
-          They used to be two rows of a three-column grid — amounts across the
-          top, ages beneath — which pairs correctly only while there are three
-          columns to pair across. Below the container breakpoint the grid
-          collapses to one, and the row order put "From 65, when you stop
-          working" under the *third* amount and each slider two fields away
-          from the figure it governs. Both sliders are labelled only "From", so
-          there was nothing left to tell them apart.
-
-          Paired in the markup instead, so the association survives any number
-          of columns rather than being an accident of one. */}
+          Nesting says it instead of arranging it: the estimator sits with the
+          base figure, the shape link sits with the two steps it fills, and
+          each amount keeps the age it starts at. At three columns this is
+          pixel-identical to what it replaces; at one it is still true. */}
       <div className="grid gap-x-5 gap-y-3 @xl:grid-cols-3">
+        {/* The base figure, and the dialog that works it out. */}
         <div className="flex flex-col gap-3">
+          <ExpenseEstimator
+            onApply={(monthly, healthFrom65) =>
+              // Two fields: the dialog works out a monthly figure and the part
+              // of it that does not start until Medicare does.
+              setMany({
+                monthlyRetirementSpending: monthly,
+                healthAfter65Monthly: healthFrom65,
+              })
+            }
+          />
           <NumberField
             id="monthlyRetirementSpending"
             label="A month in retirement"
@@ -715,52 +696,70 @@ function SpendingSteps({
           </span>
         </div>
 
-        <div className="flex flex-col gap-3">
-          <NumberField
-            id="spendingStep1Monthly"
-            label="Then this a month"
-            value={inputs.spendingStep1Monthly}
-            min={0}
-            max={100000}
-            step={100}
-            prefix="$"
-            placeholder="0 for no change"
-            onChange={(v) => set('spendingStep1Monthly', v ?? 0)}
-          />
-          <SliderField
-            id="spendingStep1Age"
-            under
-            label="From"
-            value={inputs.spendingStep1Age}
-            min={AGE_MIN}
-            max={AGE_MAX}
-            step={1}
-            onChange={(v) => set('spendingStep1Age', v)}
-          />
-        </div>
+        {/* The two steps, and the one link that fills both — so it spans them
+            rather than sitting over the first and meaning the pair. */}
+        <div className="flex flex-col gap-3 @xl:col-span-2">
+          <button
+            type="button"
+            onClick={
+              on
+                ? () => setMany({ spendingStep1Monthly: 0, spendingStep2Monthly: 0 })
+                : applySmile
+            }
+            className="w-fit rounded-sm text-xs font-medium text-primary underline underline-offset-4 transition-colors hover:text-primary/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            {on ? 'Keep it level instead' : 'Use the usual shape'}
+          </button>
 
-        <div className="flex flex-col gap-3">
-          <NumberField
-            id="spendingStep2Monthly"
-            label="And then this"
-            value={inputs.spendingStep2Monthly}
-            min={0}
-            max={100000}
-            step={100}
-            prefix="$"
-            placeholder="0 for no change"
-            onChange={(v) => set('spendingStep2Monthly', v ?? 0)}
-          />
-          <SliderField
-            id="spendingStep2Age"
-            under
-            label="From"
-            value={inputs.spendingStep2Age}
-            min={AGE_MIN}
-            max={AGE_MAX}
-            step={1}
-            onChange={(v) => set('spendingStep2Age', v)}
-          />
+          <div className="grid gap-x-5 gap-y-3 @xl:grid-cols-2">
+            <div className="flex flex-col gap-3">
+              <NumberField
+                id="spendingStep1Monthly"
+                label="Then this a month"
+                value={inputs.spendingStep1Monthly}
+                min={0}
+                max={100000}
+                step={100}
+                prefix="$"
+                placeholder="0 for no change"
+                onChange={(v) => set('spendingStep1Monthly', v ?? 0)}
+              />
+              <SliderField
+                id="spendingStep1Age"
+                under
+                label="From"
+                value={inputs.spendingStep1Age}
+                min={AGE_MIN}
+                max={AGE_MAX}
+                step={1}
+                onChange={(v) => set('spendingStep1Age', v)}
+              />
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <NumberField
+                id="spendingStep2Monthly"
+                label="And then this"
+                value={inputs.spendingStep2Monthly}
+                min={0}
+                max={100000}
+                step={100}
+                prefix="$"
+                placeholder="0 for no change"
+                onChange={(v) => set('spendingStep2Monthly', v ?? 0)}
+              />
+              <SliderField
+                id="spendingStep2Age"
+                under
+                label="From"
+                value={inputs.spendingStep2Age}
+                min={AGE_MIN}
+                max={AGE_MAX}
+                step={1}
+                onChange={(v) => set('spendingStep2Age', v)}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
