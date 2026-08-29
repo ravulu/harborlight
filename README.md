@@ -151,6 +151,9 @@ lib/
 - [Deploying on Render](docs/deploy-render.md) — the environment variables,
   the two that are read at build time rather than run time, and what breaks
   when they are wrong.
+- [Debt payoff: snowball and avalanche](docs/debt-payoff.md) — a design, not
+  yet built: one engine behind a standalone calculator and an in-place section
+  on Assets & liabilities, and what adding a mortgage payment field touches.
 - [Keeping the published figures current](docs/tax-data-updates.md) — a design,
   not yet built: how the tax, IRMAA, ACA and state tables would follow the
   government's own publication cycle, and why the numbers are proposed for

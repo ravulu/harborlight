@@ -26,6 +26,8 @@ import {
 import { blankHolding } from '@/lib/holdings-store'
 import type { HouseholdFacts, Register } from '@/lib/balance-sheet'
 import { cn } from '@/lib/utils'
+import type { Liability } from '@/lib/liabilities'
+import { DebtPayoffCalculator } from '@/components/debt/debt-payoff-calculator'
 import { LiabilitiesList } from '@/components/holdings/liabilities-list'
 import { InfoTip } from '@/components/planner/info-tip'
 import { caretAfter, significantBefore, withThousands } from '@/lib/number-format'
@@ -1066,6 +1068,15 @@ export function HoldingsScreen({
         }}
       />
 
+      {/* The same calculator the standalone page runs, handed the debts that
+          are already here rather than a blank form.
+          A link would have sent somebody who has just typed every one of them
+          to an empty page to type them again — which is the reader this is
+          most for. Read-only by construction: no `onChange`, so the list above
+          stays the one place a debt is edited and there is no second copy to
+          drift. */}
+      {state.liabilities.some((l) => l.balance > 0) && <PayoffSection debts={state.liabilities} />}
+
       {sales.length > 0 && <Timeline sales={sales} />}
 
       <div className="flex flex-wrap items-start justify-between gap-4 border-t border-border pt-4">
@@ -1275,6 +1286,45 @@ function Timeline({ sales }: { sales: NonNullable<ReturnType<typeof realise>>[] 
           limit for help with health cover.
         </p>
       )}
+    </Card>
+  )
+}
+
+/**
+ * How fast these debts clear, offered rather than imposed.
+ *
+ * Collapsed by default: somebody on this tab came to enter what they own and
+ * owe, and a payoff table unfolding underneath it is an answer to a question
+ * they have not asked yet. Open, it is the same component the standalone
+ * calculator uses, so the two cannot report different figures for the same
+ * debts.
+ */
+function PayoffSection({ debts }: { debts: Liability[] }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <Card className="flex flex-col gap-3 p-6">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o)
+          if (!open) record('debt_answered', undefined, true)
+        }}
+        className="flex w-fit items-center gap-2 text-left"
+      >
+        <h2 className="font-serif text-lg font-medium text-foreground">
+          How fast could these clear?
+        </h2>
+        <ChevronDown
+          className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')}
+        />
+      </button>
+      <p className="max-w-2xl text-sm text-muted-foreground text-pretty">
+        The two ways of paying off the debts above, side by side. This does
+        not change your plan. It is just a way to see what paying more each
+        month would do.
+      </p>
+      {open && <DebtPayoffCalculator debts={debts} />}
     </Card>
   )
 }

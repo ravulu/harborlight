@@ -65,6 +65,7 @@ function NavMenu({
       <MenuContent>
         {item('/planner', 'Retirement Planner')}
         {item('/goal', 'Savings Estimator')}
+        {item('/debt-payoff', 'Debt Payoff')}
         {item('/faq', 'FAQ')}
         {isAuthed && !isLocal && item('/dashboard', 'My plans')}
         <MenuSeparator />
@@ -177,6 +178,7 @@ export function SiteHeader({
               other page points at is one a crawler treats as worth reading,
               and it answers the questions people arrive with. */}
           {navLink('/goal', 'Savings Estimator')}
+          {navLink('/debt-payoff', 'Debt Payoff')}
           {navLink('/faq', 'FAQ')}
           {isAuthed && !isLocal && navLink('/dashboard', 'My plans')}
           <FeedbackDialog />

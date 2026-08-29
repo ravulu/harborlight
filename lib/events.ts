@@ -35,6 +35,15 @@ export const EVENT_NAMES = [
    */
   'register_started',
   /**
+   * The debt calculator produced an answer, and somebody carried it onward.
+   *
+   * The pair the savings goal page already keeps, for the same question: does
+   * a standalone calculator reached from a search bring anybody into the plan,
+   * or is it a page people use once and leave. Milestones, never figures.
+   */
+  'debt_answered',
+  'debt_handoff',
+  /**
    * The three things local mode adds, and the questions they answer.
    *
    * Keeping plans in a browser creates problems a database does not have, and
