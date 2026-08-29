@@ -155,6 +155,8 @@ export const retirementPlans = pgTable('retirement_plans', {
   pensionCola: real('pensionCola').notNull().default(0),
   otherIncomeMonthly: real('otherIncomeMonthly').notNull().default(0),
   otherIncomeStartAge: integer('otherIncomeStartAge').notNull().default(65),
+  /** 0 means it never stops, which is what plans saved before this assumed. */
+  otherIncomeEndAge: integer('otherIncomeEndAge').notNull().default(0),
   federalTaxRate: real('federalTaxRate').notNull().default(0),
   stateTaxRate: real('stateTaxRate').notNull().default(0),
   taxState: text('taxState').notNull().default(''),

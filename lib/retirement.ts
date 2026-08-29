@@ -136,6 +136,21 @@ export interface PlanInputs {
   otherIncomeMonthly: number
   otherIncomeStartAge: number
   /**
+   * The age it stops. Zero means it never does, which is the default and what
+   * every plan written before this field assumed.
+   *
+   * Exclusive, like `endAge`: set 65 and the last year paid is 64. That is the
+   * reading the label asks for — "stops at 65" — and it is the one the
+   * commonest case wants, which is work kept on for the health cover and
+   * dropped the day Medicare starts.
+   *
+   * Without it every stream ran for life. Part-time work bridging to Medicare,
+   * a consulting contract, a rental sold at 70 — all of them were modelled as
+   * income until death, which overstates the plan for decades and does it
+   * silently.
+   */
+  otherIncomeEndAge: number
+  /**
    * What the brackets came to, as a percentage — a readout, not a setting.
    *
    * Recomputed by `withDerivedRates` on every edit and on load, and read by
@@ -399,6 +414,8 @@ export const DEFAULT_INPUTS: PlanInputs = {
   pensionCola: 0,
   otherIncomeMonthly: 0,
   otherIncomeStartAge: 65,
+  // Never stops, which is what every plan written before this field meant.
+  otherIncomeEndAge: 0,
   // Placeholders only: with no state named these are worked out from the
   // federal brackets as soon as the figures are complete.
   federalTaxRate: 0,
@@ -599,6 +616,7 @@ export function simulate(inputs: PlanInputs): PlanResult {
     pensionCola,
     otherIncomeMonthly,
     otherIncomeStartAge,
+    otherIncomeEndAge,
     taxState,
     filingStatus,
     // Absent on every stored plan, and on every plan the form produces. Only
@@ -801,7 +819,25 @@ export function simulate(inputs: PlanInputs): PlanResult {
         otherIncome +=
           pensionMonthly * 12 * inflator * Math.pow(pensionDrift, age - pensionStartAge)
       }
-      if (age >= otherIncomeStartAge) {
+      /**
+       * Zero — or missing — means it never stops.
+       *
+       * Written as "is there a positive end age" rather than "is the end age
+       * zero", because the second is false for `undefined` and the stream then
+       * failed the `age < undefined` test as well, paying nothing at all. A
+       * plan read before the column exists, or built without the field, would
+       * have lost its other income entirely rather than keeping it for life —
+       * the opposite of the default this field was given.
+       *
+       * Exclusive otherwise, like `endAge`: an end of 65 pays through 64,
+       * because the day Medicare starts is the day a job kept for its health
+       * cover stops being worth keeping.
+       */
+      const stopsAt =
+        Number.isFinite(otherIncomeEndAge) && otherIncomeEndAge > 0
+          ? otherIncomeEndAge
+          : null
+      if (age >= otherIncomeStartAge && (stopsAt === null || age < stopsAt)) {
         otherIncome += otherIncomeMonthly * 12 * inflator
       }
 

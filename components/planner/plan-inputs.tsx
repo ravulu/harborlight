@@ -1654,6 +1654,29 @@ export function PlanInputsPanel({
                 step={1}
                 onChange={(v) => set('otherIncomeStartAge', v)}
               />
+              {/* Beside the age it starts, because "from 55" and "until 65" is
+                  one thought. Zero is the whole range below the youngest age,
+                  so the slider can express "never stops" without a checkbox
+                  beside it — and that is the default, which is what every plan
+                  written before this field already meant. */}
+              <SliderField
+                id="otherIncomeEndAge"
+                label="Other income stops at"
+                value={inputs.otherIncomeEndAge}
+                min={0}
+                max={AGE_MAX}
+                step={1}
+                onChange={(v) => set('otherIncomeEndAge', v)}
+              />
+              {inputs.otherIncomeMonthly > 0 && (
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {inputs.otherIncomeEndAge <= 0
+                    ? 'At nothing it carries on for the whole plan. Slide it up for income that stops — part-time hours kept on for the health cover, a contract, a rental you mean to sell.'
+                    : inputs.otherIncomeEndAge <= inputs.otherIncomeStartAge
+                      ? 'This is before the income starts, so none of it is counted.'
+                      : `Paid from ${inputs.otherIncomeStartAge} through ${inputs.otherIncomeEndAge - 1}, and nothing from ${inputs.otherIncomeEndAge}.`}
+                </p>
+              )}
               {inputs.pensionMonthly > 0 && (
                 <p className="text-xs text-muted-foreground leading-relaxed">
                   {inputs.pensionCola === 0

@@ -209,3 +209,50 @@ describe.runIf(isLocal)('the FAQ in local mode', () => {
     )
   })
 })
+
+/**
+ * The debt payoff answers.
+ *
+ * "Snowball or avalanche" is among the most-asked questions in this subject
+ * and the reason somebody would find `/debt-payoff` at all, so the FAQ has to
+ * answer it — and answer it the way the calculator does, which is by pricing
+ * both and naming neither.
+ */
+describe('the debt payoff questions', () => {
+  const snowball = answer('Should I use the debt snowball')
+  const projection = answer('Does paying off debt change my retirement projection')
+
+  it('explains the rollover, which is the mechanism both share', () => {
+    expect(snowball.a).toMatch(/whole payment joins|joins the spare money/i)
+    expect(snowball.a).toMatch(/minimum on every debt/i)
+  })
+
+  it('gives each method its own honest claim', () => {
+    // Avalanche always wins on interest; snowball wins on getting one gone.
+    expect(snowball.a).toMatch(/highest interest rate[\s\S]*costs less interest/i)
+    expect(snowball.a).toMatch(/smallest balance[\s\S]*gone sooner/i)
+  })
+
+  it('names no winner, like every other comparison here', () => {
+    const directive = /\b(you should|we recommend|the best|is best|we suggest|you ought)\b/i
+    expect(directive.test(snowball.a)).toBe(false)
+    expect(directive.test(projection.a)).toBe(false)
+  })
+
+  /**
+   * The two things that make a reader think the calculator is broken. Both
+   * are in the answer because both are cheaper to read than to discover.
+   */
+  it('warns that the two often tie, and why', () => {
+    expect(snowball.a).toMatch(/identical|come out the same/i)
+    expect(snowball.a).toMatch(/smallest balance frequently carries the highest rate/i)
+    expect(snowball.a).toMatch(/not entered an interest rate|nothing for the avalanche to sort by/i)
+  })
+
+  it('says plainly that debt does not reach the projection', () => {
+    // The same disclosure the register carries. An FAQ that left this out
+    // would have somebody clearing a card and hunting for the change.
+    expect(projection.a).toMatch(/does not model debt payments/i)
+    expect(projection.a).toMatch(/net worth/i)
+  })
+})

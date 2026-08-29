@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { headers } from 'next/headers'
 
 import { isAdminEmail } from '@/lib/admin'
@@ -42,6 +43,18 @@ export default async function DebtPayoffRoute() {
             highest interest rate first and you pay less. Add your debts below
             to see both, and to see what it costs if you carry on paying just
             the minimums.
+          </p>
+          {/* The two questions this page raises and cannot answer inside a
+              row of figures: which method to pick, and why clearing a card
+              does not move the retirement chart. */}
+          <p className="text-sm text-muted-foreground">
+            <Link
+              href="/faq"
+              className="font-medium text-primary underline underline-offset-4 hover:text-primary/80"
+            >
+              How the two methods differ, and why this does not change your
+              retirement projection
+            </Link>
           </p>
         </div>
         <DebtPayoffPage />
